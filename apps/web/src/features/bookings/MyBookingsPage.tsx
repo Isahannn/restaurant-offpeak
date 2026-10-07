@@ -8,6 +8,7 @@ import {
 } from "@telegram-apps/sdk-react";
 import type { BookingConfirmationDto } from "@app/shared";
 import { apiGet } from "../../api/client";
+import { bookingPhase } from "./bookingPhase";
 import { MyBookingCard } from "./MyBookingCard";
 
 interface MyBookingsPageProps {
@@ -21,6 +22,13 @@ type LoadState =
 
 export function MyBookingsPage({ onBack }: MyBookingsPageProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [now, setNow] = useState(() => Date.now());
+
+  // Re-evaluate every 30s so cancel links and statuses change while the page stays open.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     try {
@@ -39,6 +47,13 @@ export function MyBookingsPage({ onBack }: MyBookingsPageProps) {
       }
     };
   }, [onBack]);
+
+  const replaceBooking = (updated: BookingConfirmationDto) =>
+    setState((prev) =>
+      prev.status === "ready"
+        ? { status: "ready", bookings: prev.bookings.map((b) => (b.id === updated.id ? updated : b)) }
+        : prev,
+    );
 
   useEffect(() => {
     let cancelled = false;
@@ -100,22 +115,60 @@ export function MyBookingsPage({ onBack }: MyBookingsPageProps) {
       )}
 
       {state.status === "ready" && state.bookings.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-          {state.bookings.map((booking) => (
-            <MyBookingCard
-              key={booking.id}
-              booking={booking}
-              onChange={(updated) =>
-                setState((prev) =>
-                  prev.status === "ready"
-                    ? { status: "ready", bookings: prev.bookings.map((b) => (b.id === updated.id ? updated : b)) }
-                    : prev,
-                )
-              }
-            />
-          ))}
-        </div>
+        <>
+          <BookingSection
+            title="Предстоящие"
+            bookings={state.bookings
+              .filter((b) => isUpcoming(b, now))
+              .sort((a, b) => startKey(a).localeCompare(startKey(b)))}
+            now={now}
+            onChange={replaceBooking}
+          />
+          <BookingSection
+            title="Прошедшие"
+            bookings={state.bookings
+              .filter((b) => !isUpcoming(b, now))
+              .sort((a, b) => startKey(b).localeCompare(startKey(a)))}
+            now={now}
+            onChange={replaceBooking}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+function startKey(booking: BookingConfirmationDto): string {
+  return `${booking.slotDate} ${booking.slotStartTime}`;
+}
+
+/** Active bookings that haven't finished yet; everything else is history. */
+function isUpcoming(booking: BookingConfirmationDto, now: number): boolean {
+  const active = booking.status === "pending" || booking.status === "confirmed";
+  return active && bookingPhase(booking, now) !== "past";
+}
+
+function BookingSection({
+  title,
+  bookings,
+  now,
+  onChange,
+}: {
+  title: string;
+  bookings: BookingConfirmationDto[];
+  now: number;
+  onChange: (updated: BookingConfirmationDto) => void;
+}) {
+  if (bookings.length === 0) return null;
+
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <h2 style={{ margin: 0, fontSize: "var(--font-size-sm)", fontWeight: 600, color: "var(--color-text-muted)" }}>
+        {title}
+      </h2>
+      {bookings.map((booking) => (
+        <MyBookingCard key={booking.id} booking={booking} now={now} onChange={onChange} />
+      ))}
+    </section>
   );
 }

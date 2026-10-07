@@ -4,9 +4,13 @@ import { ApiError, apiPost } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { formatSlotLabel } from "../offers/formatSlotLabel";
+import type { Phase } from "./bookingPhase";
+import { bookingPhase } from "./bookingPhase";
 
 interface MyBookingCardProps {
   booking: BookingConfirmationDto;
+  /** Current time from the page's shared clock, so the card updates as time passes. */
+  now: number;
   onChange: (updated: BookingConfirmationDto) => void;
 }
 
@@ -15,34 +19,30 @@ const cancelErrors: Record<string, string> = {
   not_cancellable: "Эту бронь уже нельзя отменить",
 };
 
-/** Device-local check only to hide the action; the server is the authority. */
-function hasStarted(booking: BookingConfirmationDto): boolean {
-  const [y, m, d] = booking.slotDate.split("-").map(Number);
-  const [hh, mm] = booking.slotStartTime.split(":").map(Number);
-  return new Date(y, m - 1, d, hh, mm).getTime() <= Date.now();
+function statusView(booking: BookingConfirmationDto, phase: Phase): { label: string; color: string } {
+  switch (booking.status) {
+    case "cancelled":
+      return { label: "Отменена", color: "var(--color-text-muted)" };
+    case "arrived":
+      return { label: "Визит состоялся", color: "var(--color-accent-strong)" };
+    case "no_show":
+      return { label: "Вы не пришли", color: "var(--color-danger)" };
+    default:
+      if (phase === "upcoming") return { label: "Подтверждена", color: "var(--color-accent-strong)" };
+      if (phase === "in_progress") return { label: "Идёт сейчас", color: "var(--color-accent-strong)" };
+      return { label: "Время брони прошло", color: "var(--color-text-muted)" };
+  }
 }
 
-const statusLabels: Record<BookingConfirmationDto["status"], string> = {
-  pending: "Ожидает",
-  confirmed: "Подтверждена",
-  arrived: "Гость пришёл",
-  no_show: "Гость не пришёл",
-  cancelled: "Отменена",
-};
-
-const statusColors: Record<BookingConfirmationDto["status"], string> = {
-  pending: "var(--color-text-muted)",
-  confirmed: "var(--color-accent-strong)",
-  arrived: "var(--color-accent-strong)",
-  no_show: "var(--color-danger)",
-  cancelled: "var(--color-text-muted)",
-};
-
-export function MyBookingCard({ booking, onChange }: MyBookingCardProps) {
-  const canCancel = (booking.status === "pending" || booking.status === "confirmed") && !hasStarted(booking);
+export function MyBookingCard({ booking, now, onChange }: MyBookingCardProps) {
+  const phase = bookingPhase(booking, now);
+  const status = statusView(booking, phase);
+  const isActive = booking.status === "pending" || booking.status === "confirmed";
+  const canCancel = isActive && phase === "upcoming";
+  const isFinished = !isActive || phase === "past";
 
   return (
-    <Card style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+    <Card style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", opacity: isFinished ? 0.7 : 1 }}>
       <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
         {booking.restaurantName}
       </span>
@@ -71,9 +71,7 @@ export function MyBookingCard({ booking, onChange }: MyBookingCardProps) {
         >
           {booking.code}
         </span>
-        <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: statusColors[booking.status] }}>
-          {statusLabels[booking.status]}
-        </span>
+        <span style={{ fontSize: "var(--font-size-xs)", fontWeight: 600, color: status.color }}>{status.label}</span>
       </div>
       {canCancel && <CancelRow booking={booking} onCancelled={onChange} />}
     </Card>
