@@ -1,7 +1,10 @@
 import { Bot, GrammyError } from "grammy";
 import { prisma } from "@app/db";
 import { isAdmin } from "./admin/isAdmin.js";
-import { startReminderScheduler } from "./reminders/startReminderScheduler.js";
+import { markNoShows } from "./noShow/markNoShowsJob.js";
+import { runReminderTick } from "./reminders/reminderJob.js";
+import { startScheduler } from "./scheduler.js";
+import { runStaffNotificationTick } from "./staffNotifications/notifyStaffJob.js";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -11,10 +14,15 @@ if (!token) {
 const webAppUrl = process.env.WEBAPP_URL;
 const adminTelegramIds = process.env.ADMIN_TELEGRAM_IDS;
 const reminderLeadMinutes = Number(process.env.REMINDER_LEAD_MINUTES ?? 120);
+const noShowGraceMinutes = Number(process.env.NO_SHOW_GRACE_MINUTES ?? 30);
 const appTimeZone = process.env.APP_TIMEZONE ?? "Europe/Moscow";
+const JOB_INTERVAL_MS = 60 * 1000;
 
 if (!Number.isInteger(reminderLeadMinutes) || reminderLeadMinutes <= 0) {
   throw new Error("REMINDER_LEAD_MINUTES must be a positive integer");
+}
+if (!Number.isInteger(noShowGraceMinutes) || noShowGraceMinutes < 0) {
+  throw new Error("NO_SHOW_GRACE_MINUTES must be a non-negative integer");
 }
 try {
   new Intl.DateTimeFormat("en-US", { timeZone: appTimeZone });
@@ -88,24 +96,69 @@ bot.command("add_staff", async (ctx) => {
   );
 });
 
-const stopReminders = startReminderScheduler({
-  leadMinutes: reminderLeadMinutes,
-  timeZone: appTimeZone,
-  send: async ({ chatId, text }) => {
+/** The user blocked the bot or never opened it: retrying cannot succeed. */
+function isPermanentTelegramFailure(err: unknown): boolean {
+  if (!(err instanceof GrammyError)) return false;
+  return err.error_code === 403 || (err.error_code === 400 && /chat not found/i.test(err.description));
+}
+
+function sendWithAppButton(buttonText: string) {
+  return async ({ chatId, text }: { chatId: bigint; text: string }) => {
     await bot.api.sendMessage(Number(chatId), text, {
-      reply_markup: webAppUrl
-        ? { inline_keyboard: [[{ text: "Мои брони", web_app: { url: webAppUrl } }]] }
-        : undefined,
+      reply_markup: webAppUrl ? { inline_keyboard: [[{ text: buttonText, web_app: { url: webAppUrl } }]] } : undefined,
     });
-  },
-  // 403: the user blocked the bot or never started it; retrying cannot succeed.
-  isPermanentFailure: (err) => err instanceof GrammyError && err.error_code === 403,
-  onError: (err, bookingId) => console.error(`reminder for booking ${bookingId} failed:`, err),
+  };
+}
+
+const logJobError = (job: string) => (err: unknown, bookingId: string) =>
+  console.error(`${job} for booking ${bookingId} failed:`, err);
+
+const summarize = ({ sent, failed }: { sent: number; failed: number }) =>
+  sent > 0 || failed > 0 ? `sent ${sent}, failed ${failed}` : null;
+
+const stopJobs = startScheduler({
+  intervalMs: JOB_INTERVAL_MS,
   log: (message) => console.log(message),
+  jobs: [
+    {
+      name: "staff-notifications",
+      run: async (now) =>
+        summarize(
+          await runStaffNotificationTick({
+            now,
+            timeZone: appTimeZone,
+            send: sendWithAppButton("Открыть панель"),
+            isPermanentFailure: isPermanentTelegramFailure,
+            onError: logJobError("staff notification"),
+          }),
+        ),
+    },
+    {
+      name: "reminders",
+      run: async (now) =>
+        summarize(
+          await runReminderTick({
+            now,
+            leadMinutes: reminderLeadMinutes,
+            timeZone: appTimeZone,
+            send: sendWithAppButton("Мои брони"),
+            isPermanentFailure: isPermanentTelegramFailure,
+            onError: logJobError("reminder"),
+          }),
+        ),
+    },
+    {
+      name: "no-shows",
+      run: async (now) => {
+        const marked = await markNoShows({ now, timeZone: appTimeZone, graceMinutes: noShowGraceMinutes });
+        return marked > 0 ? `marked ${marked}` : null;
+      },
+    },
+  ],
 });
 
 const shutdown = async () => {
-  stopReminders();
+  stopJobs();
   await bot.stop();
   await prisma.$disconnect();
   process.exit(0);

@@ -105,6 +105,8 @@ model Booking {
   code            String        @unique
   status          BookingStatus @default(pending)
   reminderSentAt  DateTime?
+  /// Set once restaurant staff have been told about this booking (bot outbox).
+  staffNotifiedAt DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
