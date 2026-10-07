@@ -1,0 +1,113 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StaffRole {
+  owner
+  staff
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  arrived
+  no_show
+  cancelled
+}
+
+model Restaurant {
+  id          String            @id @default(cuid())
+  name        String
+  imageUrl    String?
+  description String?
+  staff       RestaurantStaff[]
+  offers      Offer[]
+  createdAt   DateTime          @default(now())
+}
+
+model RestaurantStaff {
+  id             String     @id @default(cuid())
+  restaurantId   String
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  telegramUserId BigInt     @unique
+  role           StaffRole  @default(staff)
+  createdAt      DateTime   @default(now())
+
+  @@index([restaurantId])
+}
+
+model Offer {
+  id              String           @id @default(cuid())
+  restaurantId    String
+  restaurant      Restaurant       @relation(fields: [restaurantId], references: [id])
+  title           String
+  discountPercent Int
+  exceptions      String[]         @default([])
+  /// Days of week this offer runs, 0 (Sunday) - 6 (Saturday), matching Date#getUTCDay().
+  daysOfWeek      Int[]
+  /// Full bookable window for the day, e.g. 11:00-22:00. Hours outside any
+  /// DiscountWindow are still bookable, just without a discount.
+  startTime       String
+  endTime         String
+  seatsPerSlot    Int
+  active          Boolean          @default(true)
+  discountWindows DiscountWindow[]
+  slots           Slot[]
+  createdAt       DateTime         @default(now())
+
+  @@index([restaurantId])
+}
+
+/// A sub-range within an Offer's bookable window where discountPercent applies.
+/// An Offer with no windows is treated as discounted across its entire window
+/// (keeps simple single-window offers from needing an explicit window row).
+model DiscountWindow {
+  id        String @id @default(cuid())
+  offerId   String
+  offer     Offer  @relation(fields: [offerId], references: [id])
+  startTime String
+  endTime   String
+
+  @@index([offerId])
+}
+
+model Slot {
+  id              String    @id @default(cuid())
+  offerId         String
+  offer           Offer     @relation(fields: [offerId], references: [id])
+  date            DateTime  @db.Date
+  startTime       String
+  endTime         String
+  seatsTotal      Int
+  seatsBooked     Int       @default(0)
+  /// Denormalized at generation time from the Offer's discount windows, so
+  /// consumers never need to re-derive it from the Offer's schedule.
+  discountPercent Int       @default(0)
+  bookings        Booking[]
+  createdAt       DateTime  @default(now())
+
+  @@unique([offerId, date, startTime])
+  @@index([date])
+}
+
+model Booking {
+  id              String        @id @default(cuid())
+  slotId          String
+  slot            Slot          @relation(fields: [slotId], references: [id])
+  guestTelegramId BigInt
+  partySize       Int           @default(1)
+  code            String        @unique
+  status          BookingStatus @default(pending)
+  reminderSentAt  DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([slotId])
+  @@index([guestTelegramId])
+}
