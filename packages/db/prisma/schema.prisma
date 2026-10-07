@@ -112,4 +112,6 @@ model Booking {
 
   @@index([slotId])
   @@index([guestTelegramId])
+  /// Bot outbox scan: new bookings staff have not been told about yet.
+  @@index([staffNotifiedAt, createdAt])
 }

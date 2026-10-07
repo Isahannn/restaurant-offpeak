@@ -1,3 +1,4 @@
+import compress from "@fastify/compress";
 import Fastify from "fastify";
 import authPlugin from "./auth/authPlugin.js";
 import { localDateString } from "@app/shared";
@@ -20,6 +21,8 @@ assertValidTimeZone(appTimeZone);
 
 const app = Fastify({ logger: true });
 
+// JSON slot lists compress ~10x; skip tiny bodies where gzip only adds overhead.
+await app.register(compress, { threshold: 1024 });
 await app.register(authPlugin, { botToken });
 await app.register(offersRoutes);
 await app.register(bookingsRoutes);

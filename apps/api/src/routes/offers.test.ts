@@ -133,6 +133,10 @@ describe("GET /offers", () => {
 
     const active = body.offers.find((o) => o.id === activeOfferId)!;
     expect(active.restaurantName).toMatch(/^Offers Route Test/);
-    expect(active.slots).toEqual([expect.objectContaining({ date: tomorrow, startTime: "12:00" })]);
+    // Assert on what matters rather than an exact list: the live API's hourly
+    // slot generator may add more slots to this active offer mid-test.
+    const slots = active.slots as Array<{ date: string; startTime: string }>;
+    expect(slots).toContainEqual(expect.objectContaining({ date: tomorrow, startTime: "12:00" }));
+    expect(slots).not.toContainEqual(expect.objectContaining({ date: today, startTime: "00:00" }));
   });
 });

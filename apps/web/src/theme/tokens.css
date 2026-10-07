@@ -1,6 +1,11 @@
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/inter/600.css";
+/* Only the scripts we render (Russian + Latin); the full family pulls in Greek,
+   Vietnamese and extended subsets nobody here needs. */
+@import "@fontsource/inter/cyrillic-400.css";
+@import "@fontsource/inter/cyrillic-500.css";
+@import "@fontsource/inter/cyrillic-600.css";
+@import "@fontsource/inter/latin-400.css";
+@import "@fontsource/inter/latin-500.css";
+@import "@fontsource/inter/latin-600.css";
 
 :root {
   /* Telegram theme params (bound at runtime by telegram.ts).
