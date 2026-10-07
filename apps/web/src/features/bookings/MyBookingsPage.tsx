@@ -102,7 +102,17 @@ export function MyBookingsPage({ onBack }: MyBookingsPageProps) {
       {state.status === "ready" && state.bookings.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
           {state.bookings.map((booking) => (
-            <MyBookingCard key={booking.id} booking={booking} />
+            <MyBookingCard
+              key={booking.id}
+              booking={booking}
+              onChange={(updated) =>
+                setState((prev) =>
+                  prev.status === "ready"
+                    ? { status: "ready", bookings: prev.bookings.map((b) => (b.id === updated.id ? updated : b)) }
+                    : prev,
+                )
+              }
+            />
           ))}
         </div>
       )}
