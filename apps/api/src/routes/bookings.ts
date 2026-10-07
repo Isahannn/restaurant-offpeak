@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import { prisma } from "@app/db";
+import { cancelBooking } from "../bookings/cancelBooking.js";
 import { createBooking } from "../bookings/createBooking.js";
 import { mapBookingToConfirmation } from "../bookings/mapBookingToConfirmation.js";
 
@@ -36,6 +37,30 @@ const bookingsRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       return reply.code(201).send(mapBookingToConfirmation(result.booking));
+    },
+  );
+
+  fastify.post(
+    "/bookings/:id/cancel",
+    { preHandler: (request, reply) => fastify.requireTelegramAuth(request, reply) },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const result = await cancelBooking({
+        bookingId: id,
+        guestTelegramId: BigInt(request.telegramUser!.id),
+      });
+
+      if (!result.ok) {
+        const statusByReason = {
+          booking_not_found: 404,
+          not_cancellable: 409,
+          slot_started: 409,
+        } as const;
+        return reply.code(statusByReason[result.reason]).send({ error: result.reason });
+      }
+
+      return mapBookingToConfirmation(result.booking);
     },
   );
 

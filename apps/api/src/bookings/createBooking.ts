@@ -12,7 +12,7 @@ export interface CreateBookingInput {
   timeZone?: string;
 }
 
-const bookingInclude = {
+export const bookingInclude = {
   slot: {
     include: {
       offer: {

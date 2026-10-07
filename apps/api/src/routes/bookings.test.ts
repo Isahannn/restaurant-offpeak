@@ -57,7 +57,7 @@ describe("bookings routes", () => {
     const slot = await prisma.slot.create({
       data: {
         offerId,
-        date: new Date("2026-12-10T00:00:00.000Z"),
+        date: new Date("2036-12-10T00:00:00.000Z"),
         startTime: "18:00",
         endTime: "20:00",
         seatsTotal: 2,
@@ -144,5 +144,50 @@ describe("bookings routes", () => {
     const body = response.json() as { bookings: Array<{ guestTelegramId: string }> };
     expect(body.bookings).toHaveLength(1);
     expect(body.bookings[0].guestTelegramId).toBe("111");
+  });
+
+  it("lets a guest cancel their own booking and frees the seats", async () => {
+    const app = buildApp();
+    // Own slot: the shared one is filled up by the sold-out test above.
+    const { id: cancelSlotId } = await prisma.slot.create({
+      data: { offerId, date: new Date("2036-12-11T00:00:00.000Z"), startTime: "18:00", endTime: "20:00", seatsTotal: 2 },
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/bookings",
+      headers: { "x-telegram-init-data": buildInitData(9101) },
+      payload: { slotId: cancelSlotId, partySize: 1 },
+    });
+    expect(created.statusCode).toBe(201);
+    const { id } = created.json() as { id: string };
+    const seatsBefore = (await prisma.slot.findUniqueOrThrow({ where: { id: cancelSlotId } })).seatsBooked;
+
+    const foreign = await app.inject({
+      method: "POST",
+      url: `/bookings/${id}/cancel`,
+      headers: { "x-telegram-init-data": buildInitData(9102) },
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    const own = await app.inject({
+      method: "POST",
+      url: `/bookings/${id}/cancel`,
+      headers: { "x-telegram-init-data": buildInitData(9101) },
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json().status).toBe("cancelled");
+
+    const repeat = await app.inject({
+      method: "POST",
+      url: `/bookings/${id}/cancel`,
+      headers: { "x-telegram-init-data": buildInitData(9101) },
+    });
+    expect(repeat.statusCode).toBe(409);
+
+    const seatsAfter = (await prisma.slot.findUniqueOrThrow({ where: { id: cancelSlotId } })).seatsBooked;
+    expect(seatsAfter).toBe(seatsBefore - 1);
+
+    await prisma.booking.deleteMany({ where: { slotId: cancelSlotId } });
+    await prisma.slot.delete({ where: { id: cancelSlotId } });
   });
 });
