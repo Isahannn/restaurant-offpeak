@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { OfferAdminDto } from "@app/shared";
 import { prisma } from "@app/db";
+import { localDateString } from "@app/shared";
+import { appTimeZone, slotHorizonDays } from "../config.js";
 import { generateSlotsJob } from "../offers/generateSlotsJob.js";
 
-const SLOT_HORIZON_DAYS = 14;
 
 interface DiscountWindowInput {
   startTime?: unknown;
@@ -151,7 +152,11 @@ const restaurantOffersRoutes: FastifyPluginAsync = async (fastify) => {
       include: { discountWindows: true },
     });
 
-    await generateSlotsJob({ horizonDays: SLOT_HORIZON_DAYS, offerId: offer.id });
+    await generateSlotsJob({
+      horizonDays: slotHorizonDays,
+      fromDate: localDateString(new Date(), appTimeZone),
+      offerId: offer.id,
+    });
 
     return reply.code(201).send(toOfferAdminDto(offer));
   });

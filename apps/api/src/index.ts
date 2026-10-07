@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import authPlugin from "./auth/authPlugin.js";
-import { appTimeZone, assertValidTimeZone } from "./config.js";
+import { localDateString } from "@app/shared";
+import { appTimeZone, assertValidTimeZone, slotHorizonDays } from "./config.js";
+import { generateSlotsJob } from "./offers/generateSlotsJob.js";
 import staffPlugin from "./auth/staffPlugin.js";
 import bookingsRoutes from "./routes/bookings.js";
 import meRoutes from "./routes/me.js";
@@ -34,6 +36,23 @@ app.get(
   { preHandler: (request, reply) => app.requireTelegramAuth(request, reply) },
   async (request) => ({ user: request.telegramUser }),
 );
+
+// Slots are materialized a fixed horizon ahead; keep extending it so offers never
+// run dry. Idempotent (skipDuplicates), so restarts and overlapping runs are safe.
+const SLOT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+const refreshSlots = async () => {
+  try {
+    const created = await generateSlotsJob({
+      horizonDays: slotHorizonDays,
+      fromDate: localDateString(new Date(), appTimeZone),
+    });
+    if (created > 0) app.log.info({ created }, "slot horizon extended");
+  } catch (err) {
+    app.log.error(err, "slot generation failed");
+  }
+};
+void refreshSlots();
+setInterval(refreshSlots, SLOT_REFRESH_INTERVAL_MS);
 
 const port = Number(process.env.API_PORT ?? 3000);
 const host = process.env.API_HOST ?? "0.0.0.0";
