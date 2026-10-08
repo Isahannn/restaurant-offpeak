@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@app/db";
 import { markNoShows } from "./markNoShowsJob.js";
 
-// Far-future clock so the live bot never touches these rows.
+// Far-future clock so the live bot never touches these rows. Every call is
+// scoped to this test's restaurant: the database is shared with the running app.
 const NOW = new Date("2031-04-07T15:00:00Z");
 const GRACE_MINUTES = 30;
 
@@ -51,9 +52,9 @@ describe("markNoShows", () => {
     const arrived = await makeBooking("12:00", "13:00", "arrived");
     const cancelled = await makeBooking("11:00", "12:00", "cancelled");
 
-    const marked = await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES });
+    const marked = await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES, restaurantId });
 
-    expect(marked).toBeGreaterThanOrEqual(2);
+    expect(marked).toBe(2);
     expect(await statusOf(ended.id)).toBe("no_show");
     expect(await statusOf(pending.id)).toBe("no_show");
     expect(await statusOf(inGrace.id)).toBe("confirmed");
@@ -62,10 +63,10 @@ describe("markNoShows", () => {
   });
 
   it("is idempotent", async () => {
-    await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES });
+    await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES, restaurantId });
     const before = await prisma.booking.count({ where: { slot: { offerId }, status: "no_show" } });
 
-    await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES });
+    await markNoShows({ now: NOW, timeZone: "UTC", graceMinutes: GRACE_MINUTES, restaurantId });
 
     expect(await prisma.booking.count({ where: { slot: { offerId }, status: "no_show" } })).toBe(before);
   });
@@ -76,7 +77,7 @@ describe("markNoShows", () => {
     // 17:30–18:00 Moscow ends 15:00 UTC; deadline 15:30 UTC is still ahead.
     const moscowLate = await makeBooking("17:30", "18:00");
 
-    await markNoShows({ now: NOW, timeZone: "Europe/Moscow", graceMinutes: GRACE_MINUTES });
+    await markNoShows({ now: NOW, timeZone: "Europe/Moscow", graceMinutes: GRACE_MINUTES, restaurantId });
 
     expect(await statusOf(moscow.id)).toBe("no_show");
     expect(await statusOf(moscowLate.id)).toBe("confirmed");

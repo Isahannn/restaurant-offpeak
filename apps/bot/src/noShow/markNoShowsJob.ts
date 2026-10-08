@@ -1,4 +1,4 @@
-import { prisma } from "@app/db";
+import { Prisma, prisma } from "@app/db";
 
 export interface MarkNoShowsOptions {
   now: Date;
@@ -6,6 +6,12 @@ export interface MarkNoShowsOptions {
   timeZone: string;
   /** How long after the slot ends staff still have to mark the visit themselves. */
   graceMinutes: number;
+  /**
+   * Limit the sweep to one restaurant. The bot never passes it; tests must,
+   * because they share the database with the running app and an unscoped sweep
+   * with a far-future clock would mark every real booking as a no-show.
+   */
+  restaurantId?: string;
 }
 
 /**
@@ -15,7 +21,11 @@ export interface MarkNoShowsOptions {
  *
  * Returns the number of bookings marked.
  */
-export async function markNoShows({ now, timeZone, graceMinutes }: MarkNoShowsOptions): Promise<number> {
+export async function markNoShows({ now, timeZone, graceMinutes, restaurantId }: MarkNoShowsOptions): Promise<number> {
+  const scope = restaurantId
+    ? Prisma.sql`AND s."offerId" IN (SELECT "id" FROM "Offer" WHERE "restaurantId" = ${restaurantId})`
+    : Prisma.empty;
+
   return prisma.$executeRaw`
     UPDATE "Booking" AS b
     SET "status" = 'no_show', "updatedAt" = ${now}::timestamptz
@@ -24,5 +34,6 @@ export async function markNoShows({ now, timeZone, graceMinutes }: MarkNoShowsOp
       AND b."status" IN ('pending', 'confirmed')
       AND (s."date" + s."endTime"::time) AT TIME ZONE ${timeZone}
           + make_interval(mins => ${graceMinutes}::int) <= ${now}::timestamptz
+      ${scope}
   `;
 }

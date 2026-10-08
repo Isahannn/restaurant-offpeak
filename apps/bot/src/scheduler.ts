@@ -25,7 +25,8 @@ export function startScheduler({ intervalMs, jobs, log }: SchedulerOptions): () 
       const summary = await job.run(new Date());
       if (summary) log(`${job.name}: ${summary}`);
     } catch (err) {
-      log(`${job.name}: failed — ${err instanceof Error ? err.message : String(err)}`);
+      // Prisma errors start with a blank line; trim so the log shows the actual reason.
+      log(`${job.name}: failed — ${(err instanceof Error ? err.message : String(err)).trim()}`);
     } finally {
       running.delete(job.name);
     }
