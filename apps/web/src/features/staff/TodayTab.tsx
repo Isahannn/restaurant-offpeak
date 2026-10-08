@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 import type { BookingStatus, RestaurantBookingDto } from "@app/shared";
 import { ApiError, apiGet, apiPatch, apiPost } from "../../api/client";
 import { Badge } from "../../components/Badge";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
-import { formatDayLabel, shiftDate, toLocalDateString } from "./dates";
+import { shiftDate, toLocalDateString } from "./dates";
+import { DayNavigator } from "./DayNavigator";
 import { inputStyle } from "./inputStyle";
 import { SectionHeader, StatusMessage } from "./ui";
 
@@ -20,6 +20,7 @@ const CHECK_IN_ERRORS: Record<string, string> = {
   booking_not_found: "Бронь с таким кодом не найдена",
   already_arrived: "Гость уже отмечен",
   booking_cancelled: "Бронь отменена",
+  outside_visit_window: "Код верный, но визит отмечается с 30 минут до начала брони и до конца её дня",
 };
 
 const STATUS_LABELS: Partial<Record<BookingStatus, string>> = {
@@ -87,10 +88,11 @@ export function TodayTab({ refreshKey, freshIds }: TodayTabProps) {
     setCheckingIn(true);
     setFeedback(null);
     try {
+      const typed = code.trim().toUpperCase();
       const booking = await apiPost<RestaurantBookingDto>("/restaurant/bookings/check-in", { code });
       setFeedback({
         tone: "success",
-        text: `${booking.code} отмечен · ${guestsLabel(booking.partySize)}, ${booking.slotStartTime}`,
+        text: `${typed} отмечен · ${guestsLabel(booking.partySize)}, ${booking.slotStartTime}`,
       });
       setCode("");
       if (booking.slotDate === date) replaceBooking(booking);
@@ -106,8 +108,12 @@ export function TodayTab({ refreshKey, freshIds }: TodayTabProps) {
     setPendingId(booking.id);
     try {
       replaceBooking(await apiPatch<RestaurantBookingDto>(`/restaurant/bookings/${booking.id}`, { status }));
-    } catch {
-      setFeedback({ tone: "error", text: "Не удалось обновить бронь" });
+    } catch (err) {
+      const reason = err instanceof ApiError ? err.reason : undefined;
+      setFeedback({
+        tone: "error",
+        text: reason === "outside_visit_window" ? "Сейчас эту отметку поставить нельзя — время брони ещё не подошло" : "Не удалось обновить бронь",
+      });
     } finally {
       setPendingId(null);
     }
@@ -147,20 +153,12 @@ export function TodayTab({ refreshKey, freshIds }: TodayTabProps) {
         </p>
       </form>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)" }}>
-        <DayButton label="Предыдущий день" onClick={() => changeDate(-1)}>
-          <ChevronLeftIcon style={{ width: 16, height: 16 }} />
-        </DayButton>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontWeight: 600 }}>{date === today ? "Сегодня" : formatDayLabel(date)}</div>
-          <div style={{ minHeight: 20, fontSize: "var(--font-size-sm)", color: "var(--color-text-muted)" }}>
-            {state.status === "ready" && `${activeBookings.length} брон. · ${guestsLabel(expectedGuests)}`}
-          </div>
-        </div>
-        <DayButton label="Следующий день" onClick={() => changeDate(1)}>
-          <ChevronRightIcon style={{ width: 16, height: 16 }} />
-        </DayButton>
-      </div>
+      <DayNavigator
+        date={date}
+        today={today}
+        onShift={changeDate}
+        subtitle={state.status === "ready" && `${activeBookings.length} брон. · ${guestsLabel(expectedGuests)}`}
+      />
 
       {state.status === "loading" && <StatusMessage>Загружаем брони…</StatusMessage>}
       {state.status === "error" && <StatusMessage>Не удалось загрузить брони</StatusMessage>}
@@ -183,31 +181,6 @@ export function TodayTab({ refreshKey, freshIds }: TodayTabProps) {
   );
 }
 
-function DayButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={onClick}
-      style={{
-        width: 36,
-        height: 36,
-        flexShrink: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: "var(--radius-sm)",
-        border: "1px solid var(--color-border)",
-        background: "var(--color-surface)",
-        color: "var(--color-text)",
-        cursor: "pointer",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
 function BookingRow({
   booking,
   fresh,
@@ -219,8 +192,6 @@ function BookingRow({
   disabled: boolean;
   onMark: (status: "arrived" | "no_show") => void;
 }) {
-  const isOpen = booking.status === "pending" || booking.status === "confirmed";
-
   return (
     <Card
       className={fresh ? "fade-up" : undefined}
@@ -243,7 +214,10 @@ function BookingRow({
             {guestsLabel(booking.partySize)}
           </span>
         </div>
-        <span style={{ fontWeight: 500, letterSpacing: "0.08em", fontSize: "var(--font-size-sm)" }}>{booking.code}</span>
+        {/* Masked on purpose: the full code has to come from the guest. */}
+        <span style={{ fontWeight: 500, letterSpacing: "0.08em", fontSize: "var(--font-size-sm)", color: "var(--color-text-muted)" }}>
+          {booking.codeHint}
+        </span>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)", minHeight: 36 }}>
@@ -254,28 +228,77 @@ function BookingRow({
           {booking.discountPercent > 0 && <Badge>−{booking.discountPercent}%</Badge>}
         </div>
 
-        {isOpen ? (
-          <div style={{ display: "flex", gap: "var(--space-2)", flexShrink: 0 }}>
-            <Button variant="secondary" disabled={disabled} onClick={() => onMark("no_show")} style={{ height: 36, fontSize: "var(--font-size-sm)" }}>
-              Не пришёл
-            </Button>
-            <Button disabled={disabled} onClick={() => onMark("arrived")} style={{ height: 36, fontSize: "var(--font-size-sm)" }}>
-              Пришёл
-            </Button>
-          </div>
-        ) : (
-          <span
-            style={{
-              flexShrink: 0,
-              fontSize: "var(--font-size-sm)",
-              fontWeight: 500,
-              color: booking.status === "arrived" ? "var(--color-accent-strong)" : "var(--color-text-muted)",
-            }}
-          >
-            {STATUS_LABELS[booking.status]}
-          </span>
-        )}
+        <VisitActions booking={booking} disabled={disabled} onMark={onMark} />
       </div>
     </Card>
+  );
+}
+
+const smallButton: React.CSSProperties = { height: 36, fontSize: "var(--font-size-sm)" };
+
+/** Buttons only inside the visit window; afterwards, the mark and how it was made. */
+function VisitActions({
+  booking,
+  disabled,
+  onMark,
+}: {
+  booking: RestaurantBookingDto;
+  disabled: boolean;
+  onMark: (status: "arrived" | "no_show") => void;
+}) {
+  const isOpen = booking.status === "pending" || booking.status === "confirmed";
+
+  if (isOpen && !booking.canMarkArrived && !booking.canMarkNoShow) {
+    return <span style={{ flexShrink: 0, fontSize: "var(--font-size-sm)", color: "var(--color-text-muted)" }}>Отметка — в день визита</span>;
+  }
+
+  if (isOpen) {
+    return (
+      <div style={{ display: "flex", gap: "var(--space-2)", flexShrink: 0 }}>
+        {booking.canMarkNoShow && (
+          <Button variant="secondary" disabled={disabled} onClick={() => onMark("no_show")} style={smallButton}>
+            Не пришёл
+          </Button>
+        )}
+        {booking.canMarkArrived && (
+          <Button disabled={disabled} onClick={() => onMark("arrived")} style={smallButton}>
+            Пришёл
+          </Button>
+        )}
+      </div>
+    );
+  }
+
+  const method = booking.status === "arrived" ? (booking.checkInMethod === "code" ? "по коду" : "вручную") : null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flexShrink: 0 }}>
+      <div style={{ textAlign: "right", lineHeight: 1.25 }}>
+        <div
+          style={{
+            fontSize: "var(--font-size-sm)",
+            fontWeight: 500,
+            color: booking.disputed
+              ? "var(--color-danger)"
+              : booking.status === "arrived"
+                ? "var(--color-accent-strong)"
+                : "var(--color-text-muted)",
+          }}
+        >
+          {booking.disputed ? "Гость оспорил" : STATUS_LABELS[booking.status]}
+        </div>
+        {(method || booking.disputed) && (
+          <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
+            {booking.disputed ? STATUS_LABELS[booking.status]?.toLowerCase() : method}
+          </div>
+        )}
+      </div>
+      {/* Staff forgot to check a guest in: allow correcting a no-show while the window is open. */}
+      {booking.status === "no_show" && booking.canMarkArrived && (
+        <Button variant="secondary" disabled={disabled} onClick={() => onMark("arrived")} style={smallButton}>
+          Пришёл
+        </Button>
+      )}
+    </div>
   );
 }

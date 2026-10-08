@@ -20,6 +20,7 @@ const cancelErrors: Record<string, string> = {
 };
 
 function statusView(booking: BookingConfirmationDto, phase: Phase): { label: string; color: string } {
+  if (booking.disputed) return { label: "Отметка оспорена", color: "var(--color-text-muted)" };
   switch (booking.status) {
     case "cancelled":
       return { label: "Отменена", color: "var(--color-text-muted)" };

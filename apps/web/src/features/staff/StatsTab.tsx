@@ -43,8 +43,9 @@ export function StatsTab({ refreshKey }: { refreshKey: number }) {
             seatsBooked: acc.seatsBooked + d.seatsBooked,
             arrived: acc.arrived + d.arrived,
             noShow: acc.noShow + d.noShow,
+            disputed: acc.disputed + d.disputed,
           }),
-          { seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0 },
+          { seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0, disputed: 0 },
         )
       : null;
 
@@ -71,6 +72,12 @@ export function StatsTab({ refreshKey }: { refreshKey: number }) {
             <StatTile label="Пришли" value={String(totals.arrived)} />
             <StatTile label="Не пришли" value={String(totals.noShow)} />
           </div>
+
+          {totals.disputed > 0 && (
+            <p style={{ margin: 0, fontSize: "var(--font-size-sm)", color: "var(--color-danger)" }}>
+              Оспорено гостями: {totals.disputed} — не учтено в «Пришли» и «Не пришли»
+            </p>
+          )}
 
           <Card style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
             {state.days.map((day) => (

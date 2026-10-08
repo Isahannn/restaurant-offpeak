@@ -3,6 +3,7 @@ import { useBookingEvents, type BookingEvent } from "../../api/eventStream";
 import { Toast } from "../../components/Toast";
 import { haptic } from "../../theme/haptics";
 import { OffersTab } from "./OffersTab";
+import { SeatsTab } from "./SeatsTab";
 import { StaffTabBar, type StaffTab } from "./StaffTabBar";
 import { StatsTab } from "./StatsTab";
 import { TodayTab } from "./TodayTab";
@@ -63,6 +64,7 @@ export function StaffPanel() {
         }}
       >
         {tab === "today" && <TodayTab refreshKey={refreshKey} freshIds={freshIds} />}
+        {tab === "seats" && <SeatsTab refreshKey={refreshKey} />}
         {tab === "offers" && <OffersTab />}
         {tab === "stats" && <StatsTab refreshKey={refreshKey} />}
       </main>
