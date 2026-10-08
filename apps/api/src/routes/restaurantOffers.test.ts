@@ -217,4 +217,68 @@ describe("restaurant offers admin routes", () => {
     const windows = await prisma.discountWindow.findMany({ where: { offerId: offerBId } });
     expect(windows).toHaveLength(1);
   });
+
+  it("accepts several discount windows and returns them sorted", async () => {
+    const response = await buildApp().inject({
+      method: "POST",
+      url: "/restaurant/offers",
+      headers: { "x-telegram-init-data": buildInitData(6001) },
+      payload: {
+        title: "Two quiet windows",
+        discountPercent: 30,
+        exceptions: [],
+        daysOfWeek: [2],
+        startTime: "12:00",
+        endTime: "23:00",
+        seatsPerSlot: 4,
+        discountWindows: [
+          { startTime: "21:00", endTime: "23:00" },
+          { startTime: "15:00", endTime: "17:00" },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().discountWindows).toEqual([
+      { startTime: "15:00", endTime: "17:00" },
+      { startTime: "21:00", endTime: "23:00" },
+    ]);
+
+    // Only the hours inside a window are discounted.
+    const slots = await prisma.slot.findMany({ where: { offerId: response.json().id }, distinct: ["startTime"], orderBy: { startTime: "asc" } });
+    const discounted = slots.filter((s) => s.discountPercent > 0).map((s) => s.startTime);
+    expect(discounted).toEqual(["15:00", "16:00", "21:00", "22:00"]);
+  });
+
+  it("rejects overlapping, out-of-hours or too many windows", async () => {
+    const base = {
+      title: "Bad windows",
+      discountPercent: 30,
+      exceptions: [],
+      daysOfWeek: [2],
+      startTime: "12:00",
+      endTime: "23:00",
+      seatsPerSlot: 4,
+    };
+    const cases = [
+      [{ startTime: "15:00", endTime: "17:00" }, { startTime: "16:00", endTime: "18:00" }],
+      [{ startTime: "11:00", endTime: "13:00" }],
+      [
+        { startTime: "12:00", endTime: "13:00" },
+        { startTime: "14:00", endTime: "15:00" },
+        { startTime: "16:00", endTime: "17:00" },
+        { startTime: "18:00", endTime: "19:00" },
+        { startTime: "20:00", endTime: "21:00" },
+      ],
+    ];
+    for (const discountWindows of cases) {
+      const response = await buildApp().inject({
+        method: "POST",
+        url: "/restaurant/offers",
+        headers: { "x-telegram-init-data": buildInitData(6001) },
+        payload: { ...base, discountWindows },
+      });
+      expect(response.statusCode).toBe(400);
+    }
+  });
 });

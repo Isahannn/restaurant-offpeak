@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import type { OfferAdminDto } from "@app/shared";
 import { apiPatch, apiPost } from "../../api/client";
 import { Button } from "../../components/Button";
@@ -19,6 +20,13 @@ const WEEK_DAYS = [
 ];
 
 const MAX_SEATS_PER_SLOT = 50;
+/** Same limit as the API. */
+const MAX_DISCOUNT_WINDOWS = 4;
+
+interface TimeWindow {
+  startTime: string;
+  endTime: string;
+}
 
 interface ScheduleChange {
   created: number;
@@ -45,15 +53,18 @@ function describeScheduleChange({ created, removed, keptBooked }: ScheduleChange
 }
 
 export function OfferForm({ initial, onCancel, onSaved }: OfferFormProps) {
-  const firstWindow = initial?.discountWindows[0];
+
   const [title, setTitle] = useState(initial?.title ?? "");
   const [discountPercent, setDiscountPercent] = useState(String(initial?.discountPercent ?? 20));
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(initial?.daysOfWeek ?? [1, 2, 3, 4]);
   const [startTime, setStartTime] = useState(initial?.startTime ?? "12:00");
   const [endTime, setEndTime] = useState(initial?.endTime ?? "22:00");
-  const [partialDiscount, setPartialDiscount] = useState(initial ? Boolean(firstWindow) : true);
-  const [discountStart, setDiscountStart] = useState(firstWindow?.startTime ?? "15:00");
-  const [discountEnd, setDiscountEnd] = useState(firstWindow?.endTime ?? "18:00");
+  const [partialDiscount, setPartialDiscount] = useState(initial ? initial.discountWindows.length > 0 : true);
+  const [windows, setWindows] = useState<TimeWindow[]>(
+    initial && initial.discountWindows.length > 0
+      ? initial.discountWindows.map((w) => ({ startTime: w.startTime, endTime: w.endTime }))
+      : [{ startTime: "15:00", endTime: "18:00" }],
+  );
   const [seatsPerSlot, setSeatsPerSlot] = useState(initial?.seatsPerSlot ?? 4);
   const [exceptions, setExceptions] = useState(initial?.exceptions.join(", ") ?? "");
   const [submitting, setSubmitting] = useState(false);
@@ -68,8 +79,10 @@ export function OfferForm({ initial, onCancel, onSaved }: OfferFormProps) {
     if (daysOfWeek.length === 0) return "Выберите хотя бы один день";
     if (startTime >= endTime) return "Время окончания должно быть позже начала";
     if (partialDiscount) {
-      if (discountStart >= discountEnd) return "Окончание скидки должно быть позже начала";
-      if (discountStart < startTime || discountEnd > endTime) return "Часы скидки должны быть внутри часов бронирования";
+      if (windows.some((w) => w.startTime >= w.endTime)) return "В каждом окне скидки конец должен быть позже начала";
+      if (windows.some((w) => w.startTime < startTime || w.endTime > endTime)) return "Часы скидки должны быть внутри часов бронирования";
+      const sorted = [...windows].sort((a, b) => a.startTime.localeCompare(b.startTime));
+      if (sorted.some((w, i) => i > 0 && w.startTime < sorted[i - 1].endTime)) return "Окна скидки не должны пересекаться";
     }
     return null;
   })();
@@ -94,7 +107,7 @@ export function OfferForm({ initial, onCancel, onSaved }: OfferFormProps) {
         endTime,
         seatsPerSlot,
         exceptions: exceptions.split(",").map((e) => e.trim()).filter(Boolean),
-        discountWindows: partialDiscount ? [{ startTime: discountStart, endTime: discountEnd }] : [],
+        discountWindows: partialDiscount ? windows : [],
       };
       if (initial) {
         const { schedule, ...offer } = await apiPatch<OfferAdminDto & { schedule: ScheduleChange }>(
@@ -180,8 +193,8 @@ export function OfferForm({ initial, onCancel, onSaved }: OfferFormProps) {
         </label>
 
         {partialDiscount && (
-          <Field label="Часы скидки">
-            <TimeRange start={discountStart} end={discountEnd} onStart={setDiscountStart} onEnd={setDiscountEnd} />
+          <Field label="Часы скидки" hint="можно несколько окон">
+            <DiscountWindows windows={windows} onChange={setWindows} defaultEnd={endTime} />
           </Field>
         )}
 
@@ -238,6 +251,103 @@ function TimeRange({
       <input type="time" value={start} onChange={(e) => onStart(e.target.value)} step={1800} style={inputStyle} />
       <span style={{ color: "var(--color-text-muted)" }}>—</span>
       <input type="time" value={end} onChange={(e) => onEnd(e.target.value)} step={1800} style={inputStyle} />
+    </div>
+  );
+}
+
+/** Editable list of discount windows: remove any (keeping at least one), add up to the limit. */
+function DiscountWindows({
+  windows,
+  onChange,
+  defaultEnd,
+}: {
+  windows: TimeWindow[];
+  onChange: (windows: TimeWindow[]) => void;
+  defaultEnd: string;
+}) {
+  const update = (index: number, patch: Partial<TimeWindow>) =>
+    onChange(windows.map((w, i) => (i === index ? { ...w, ...patch } : w)));
+
+  const add = () => {
+    // Start the new window where the last one ends, one hour long.
+    const last = windows[windows.length - 1];
+    const [h, m] = (last?.endTime ?? "15:00").split(":").map(Number);
+    const start = `${String(Math.min(h + 1, 22)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    const end = `${String(Math.min(h + 2, 23)).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    onChange([...windows, { startTime: start, endTime: end <= defaultEnd ? end : defaultEnd }]);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      {windows.map((w, index) => (
+        <div key={index} style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr 36px", alignItems: "center", gap: "var(--space-2)" }}>
+          <input
+            type="time"
+            aria-label={`Начало окна ${index + 1}`}
+            value={w.startTime}
+            step={1800}
+            onChange={(e) => update(index, { startTime: e.target.value })}
+            style={inputStyle}
+          />
+          <span style={{ color: "var(--color-text-muted)" }}>—</span>
+          <input
+            type="time"
+            aria-label={`Конец окна ${index + 1}`}
+            value={w.endTime}
+            step={1800}
+            onChange={(e) => update(index, { endTime: e.target.value })}
+            style={inputStyle}
+          />
+          {/* Keep the column even with one window so rows never shift. */}
+          {windows.length > 1 ? (
+            <button
+              type="button"
+              aria-label={`Удалить окно ${index + 1}`}
+              onClick={() => onChange(windows.filter((_, i) => i !== index))}
+              className="pressable"
+              style={{
+                width: 36,
+                height: 36,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--color-border)",
+                background: "var(--color-surface)",
+                color: "var(--color-text-muted)",
+                cursor: "pointer",
+              }}
+            >
+              <XMarkIcon style={{ width: 16, height: 16 }} />
+            </button>
+          ) : (
+            <span />
+          )}
+        </div>
+      ))}
+      {windows.length < MAX_DISCOUNT_WINDOWS && (
+        <button
+          type="button"
+          onClick={add}
+          className="pressable"
+          style={{
+            alignSelf: "flex-start",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "var(--space-1)",
+            padding: 0,
+            border: "none",
+            background: "none",
+            color: "var(--color-accent-strong)",
+            fontSize: "var(--font-size-sm)",
+            fontWeight: 500,
+            cursor: "pointer",
+          }}
+        >
+          <PlusIcon style={{ width: 16, height: 16 }} />
+          Ещё окно
+        </button>
+      )}
     </div>
   );
 }

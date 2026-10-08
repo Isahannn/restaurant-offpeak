@@ -45,6 +45,24 @@ function isValidDiscountWindow(w: unknown): w is { startTime: string; endTime: s
   return isTime(window?.startTime) && isTime(window?.endTime) && window.startTime < window.endTime;
 }
 
+const MAX_DISCOUNT_WINDOWS = 4;
+
+/** Windows sorted by start, each inside the bookable hours and none overlapping. */
+function normalizeDiscountWindows(
+  windows: Array<{ startTime: string; endTime: string }>,
+  startTime: string,
+  endTime: string,
+): Array<{ startTime: string; endTime: string }> | null {
+  if (windows.length > MAX_DISCOUNT_WINDOWS) return null;
+  const sorted = [...windows].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  for (let i = 0; i < sorted.length; i++) {
+    const w = sorted[i];
+    if (w.startTime < startTime || w.endTime > endTime) return null;
+    if (i > 0 && w.startTime < sorted[i - 1].endTime) return null;
+  }
+  return sorted.map((w) => ({ startTime: w.startTime, endTime: w.endTime }));
+}
+
 function validateCreateOfferBody(body: CreateOfferBody): { ok: true; value: ValidOfferInput } | { ok: false } {
   if (
     typeof body.title !== "string" ||
@@ -70,6 +88,15 @@ function validateCreateOfferBody(body: CreateOfferBody): { ok: true; value: Vali
     return { ok: false };
   }
 
+  const discountWindows = normalizeDiscountWindows(
+    body.discountWindows as Array<{ startTime: string; endTime: string }>,
+    body.startTime,
+    body.endTime,
+  );
+  if (!discountWindows) {
+    return { ok: false };
+  }
+
   return {
     ok: true,
     value: {
@@ -80,7 +107,7 @@ function validateCreateOfferBody(body: CreateOfferBody): { ok: true; value: Vali
       startTime: body.startTime,
       endTime: body.endTime,
       seatsPerSlot: body.seatsPerSlot,
-      discountWindows: body.discountWindows as Array<{ startTime: string; endTime: string }>,
+      discountWindows,
     },
   };
 }
@@ -109,7 +136,9 @@ function toOfferAdminDto(offer: {
     endTime: offer.endTime,
     seatsPerSlot: offer.seatsPerSlot,
     active: offer.active,
-    discountWindows: offer.discountWindows.map((w) => ({ startTime: w.startTime, endTime: w.endTime })),
+    discountWindows: offer.discountWindows
+      .map((w) => ({ startTime: w.startTime, endTime: w.endTime }))
+      .sort((a, b) => a.startTime.localeCompare(b.startTime)),
   };
 }
 
