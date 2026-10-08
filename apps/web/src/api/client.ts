@@ -6,7 +6,7 @@ declare global {
   }
 }
 
-function getInitDataRaw(): string | undefined {
+export function getInitDataRaw(): string | undefined {
   // The official bridge script (window.Telegram.WebApp) is always present inside
   // real Telegram clients and reflects the current launch data reliably. Prefer
   // it over the SDK's retrieveLaunchParams(), which caches its result in

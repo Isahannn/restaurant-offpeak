@@ -14,7 +14,7 @@ type LoadState =
 
 const PERIOD_DAYS = 7;
 
-export function StatsTab() {
+export function StatsTab({ refreshKey }: { refreshKey: number }) {
   const [period, setPeriod] = useState<Period>("past");
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
@@ -33,7 +33,7 @@ export function StatsTab() {
     return () => {
       cancelled = true;
     };
-  }, [period]);
+  }, [period, refreshKey]);
 
   const totals =
     state.status === "ready"

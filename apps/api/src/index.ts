@@ -8,7 +8,9 @@ import staffPlugin from "./auth/staffPlugin.js";
 import bookingsRoutes from "./routes/bookings.js";
 import meRoutes from "./routes/me.js";
 import offersRoutes from "./routes/offers.js";
+import { createBookingEventHub } from "./realtime/bookingEventHub.js";
 import restaurantBookingsRoutes from "./routes/restaurantBookings.js";
+import restaurantEventsRoutes from "./routes/restaurantEvents.js";
 import restaurantOffersRoutes from "./routes/restaurantOffers.js";
 import restaurantsRoutes from "./routes/restaurants.js";
 
@@ -31,6 +33,13 @@ await app.register(staffPlugin);
 await app.register(meRoutes);
 await app.register(restaurantOffersRoutes);
 await app.register(restaurantBookingsRoutes);
+
+// Live booking updates for the restaurant panel (Postgres NOTIFY -> SSE).
+const bookingEvents = createBookingEventHub(process.env.DATABASE_URL!, {
+  log: (message) => app.log.warn(message),
+});
+await app.register(restaurantEventsRoutes, { hub: bookingEvents });
+app.addHook("onClose", () => bookingEvents.close());
 
 app.get("/health", async () => ({ status: "ok" }));
 

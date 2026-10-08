@@ -15,10 +15,12 @@
     "@app/shared": "*",
     "@fastify/compress": "^8.3.1",
     "fastify": "^5.12.5",
-    "fastify-plugin": "^6.0.0"
+    "fastify-plugin": "^6.0.0",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.11"

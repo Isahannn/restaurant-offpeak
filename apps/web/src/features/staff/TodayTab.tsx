@@ -36,7 +36,14 @@ function guestsLabel(count: number): string {
   return `${count} гостей`;
 }
 
-export function TodayTab() {
+interface TodayTabProps {
+  /** Changes whenever a live booking event arrives; triggers a silent refetch. */
+  refreshKey: number;
+  /** Bookings that just arrived live, shown highlighted for a few seconds. */
+  freshIds: string[];
+}
+
+export function TodayTab({ refreshKey, freshIds }: TodayTabProps) {
   const [today] = useState(() => toLocalDateString(new Date()));
   const [date, setDate] = useState(today);
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -57,7 +64,8 @@ export function TodayTab() {
     return () => {
       cancelled = true;
     };
-  }, [date]);
+    // refreshKey: live events refetch in place, keeping the current list on screen meanwhile.
+  }, [date, refreshKey]);
 
   const changeDate = (days: number) => {
     setState({ status: "loading" });
@@ -164,6 +172,7 @@ export function TodayTab() {
             <BookingRow
               key={booking.id}
               booking={booking}
+              fresh={freshIds.includes(booking.id)}
               disabled={pendingId === booking.id}
               onMark={(status) => mark(booking, status)}
             />
@@ -201,17 +210,31 @@ function DayButton({ label, onClick, children }: { label: string; onClick: () =>
 
 function BookingRow({
   booking,
+  fresh,
   disabled,
   onMark,
 }: {
   booking: RestaurantBookingDto;
+  fresh: boolean;
   disabled: boolean;
   onMark: (status: "arrived" | "no_show") => void;
 }) {
   const isOpen = booking.status === "pending" || booking.status === "confirmed";
 
   return (
-    <Card style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", opacity: booking.status === "cancelled" ? 0.6 : 1 }}>
+    <Card
+      className={fresh ? "fade-up" : undefined}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-3)",
+        opacity: booking.status === "cancelled" ? 0.6 : 1,
+        // Same border width in both states so a highlight never shifts the layout.
+        borderColor: fresh ? "var(--color-accent)" : undefined,
+        boxShadow: fresh ? "0 0 0 3px var(--color-accent-soft)" : undefined,
+        transition: "border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out)",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "var(--space-2)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: "var(--space-2)" }}>
           <span style={{ fontWeight: 600 }}>{booking.slotStartTime}</span>
