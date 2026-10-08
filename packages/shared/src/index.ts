@@ -68,11 +68,16 @@ export interface BookingConfirmationDto extends BookingDto {
   slotEndTime: string;
   offerTitle: string;
   restaurantName: string;
+  /** The guest disputed how their visit was marked. */
+  disputed?: boolean;
 }
+
+export type CheckInMethod = "code" | "manual";
 
 export interface RestaurantBookingDto {
   id: string;
-  code: string;
+  /** Masked (e.g. "••••AB"): staff must get the full code from the guest to check them in. */
+  codeHint: string;
   partySize: number;
   status: BookingStatus;
   slotDate: string;
@@ -80,6 +85,12 @@ export interface RestaurantBookingDto {
   slotEndTime: string;
   offerTitle: string;
   discountPercent: number;
+  checkInMethod: CheckInMethod | null;
+  /** The guest says the arrived / no-show mark is wrong. */
+  disputed: boolean;
+  /** Whether "arrived" / "no-show" may be set right now (visit window). */
+  canMarkArrived: boolean;
+  canMarkNoShow: boolean;
 }
 
 export interface RestaurantDayStatsDto {
@@ -88,6 +99,23 @@ export interface RestaurantDayStatsDto {
   seatsBooked: number;
   arrived: number;
   noShow: number;
+  /** Visit marks the guest disputed; not counted in arrived / noShow. */
+  disputed: number;
+}
+
+export interface RestaurantSlotDto {
+  id: string;
+  offerTitle: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  seatsTotal: number;
+  seatsBooked: number;
+  /** The offer's usual capacity, used when reopening a closed slot. */
+  defaultSeats: number;
+  discountPercent: number;
+  /** Started slots can no longer be edited. */
+  started: boolean;
 }
 
 export { localDateString, slotStartInstant } from "./time.js";

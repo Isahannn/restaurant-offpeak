@@ -19,5 +19,6 @@ export function mapBookingToConfirmation(booking: BookingWithRelations): Booking
     slotEndTime: booking.slot.endTime,
     offerTitle: booking.slot.offer.title,
     restaurantName: booking.slot.offer.restaurant.name,
+    disputed: booking.disputedAt !== null,
   };
 }

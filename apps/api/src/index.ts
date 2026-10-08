@@ -12,6 +12,7 @@ import { createBookingEventHub } from "./realtime/bookingEventHub.js";
 import restaurantBookingsRoutes from "./routes/restaurantBookings.js";
 import restaurantEventsRoutes from "./routes/restaurantEvents.js";
 import restaurantOffersRoutes from "./routes/restaurantOffers.js";
+import restaurantSlotsRoutes from "./routes/restaurantSlots.js";
 import restaurantsRoutes from "./routes/restaurants.js";
 
 const botToken = process.env.BOT_TOKEN;
@@ -33,6 +34,7 @@ await app.register(staffPlugin);
 await app.register(meRoutes);
 await app.register(restaurantOffersRoutes);
 await app.register(restaurantBookingsRoutes);
+await app.register(restaurantSlotsRoutes);
 
 // Live booking updates for the restaurant panel (Postgres NOTIFY -> SSE).
 const bookingEvents = createBookingEventHub(process.env.DATABASE_URL!, {

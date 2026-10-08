@@ -1,11 +1,19 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { RestaurantBookingDto, RestaurantDayStatsDto } from "@app/shared";
 import { prisma } from "@app/db";
+import { visitWindow } from "../bookings/visitWindow.js";
+import { appTimeZone } from "../config.js";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_STATS_DAYS = 31;
 const MARKABLE_STATUSES = ["arrived", "no_show"] as const;
 type MarkableStatus = (typeof MARKABLE_STATUSES)[number];
+
+interface RestaurantBookingsOptions {
+  /** Injectable clock and zone for tests; default to real time and APP_TIMEZONE. */
+  now?: () => Date;
+  timeZone?: string;
+}
 
 function parseDate(value: unknown): Date | null {
   if (typeof value !== "string" || !DATE_PATTERN.test(value)) {
@@ -23,13 +31,20 @@ function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
+/** Staff see only the tail of a code, so "check-in by code" needs the guest present. */
+export function maskCode(code: string): string {
+  return `••••${code.slice(-2)}`;
+}
+
 const bookingInclude = { slot: { include: { offer: true } } } as const;
 
-function toRestaurantBookingDto(booking: {
+interface BookingRow {
   id: string;
   code: string;
   partySize: number;
   status: RestaurantBookingDto["status"];
+  checkInMethod: RestaurantBookingDto["checkInMethod"];
+  disputedAt: Date | null;
   slot: {
     date: Date;
     startTime: string;
@@ -37,21 +52,40 @@ function toRestaurantBookingDto(booking: {
     discountPercent: number;
     offer: { title: string };
   };
-}): RestaurantBookingDto {
-  return {
-    id: booking.id,
-    code: booking.code,
-    partySize: booking.partySize,
-    status: booking.status,
-    slotDate: toDateString(booking.slot.date),
-    slotStartTime: booking.slot.startTime,
-    slotEndTime: booking.slot.endTime,
-    offerTitle: booking.slot.offer.title,
-    discountPercent: booking.slot.discountPercent,
-  };
 }
 
-const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
+const restaurantBookingsRoutes: FastifyPluginAsync<RestaurantBookingsOptions> = async (fastify, options) => {
+  const now = options.now ?? (() => new Date());
+  const timeZone = options.timeZone ?? appTimeZone;
+
+  const toDto = (booking: BookingRow): RestaurantBookingDto => {
+    const open = booking.status !== "cancelled";
+    const window = visitWindow(booking.slot, now(), timeZone);
+    return {
+      id: booking.id,
+      codeHint: maskCode(booking.code),
+      partySize: booking.partySize,
+      status: booking.status,
+      slotDate: toDateString(booking.slot.date),
+      slotStartTime: booking.slot.startTime,
+      slotEndTime: booking.slot.endTime,
+      offerTitle: booking.slot.offer.title,
+      discountPercent: booking.slot.discountPercent,
+      checkInMethod: booking.checkInMethod,
+      disputed: booking.disputedAt !== null,
+      canMarkArrived: open && booking.status !== "arrived" && window.canMarkArrived,
+      canMarkNoShow: open && booking.status !== "no_show" && window.canMarkNoShow,
+    };
+  };
+
+  /** A fresh mark is announced to the guest again and supersedes an old dispute. */
+  const markData = (status: MarkableStatus, method: "code" | "manual" | null) => ({
+    status,
+    checkInMethod: status === "arrived" ? method : null,
+    guestNotifiedStatusAt: null,
+    disputedAt: null,
+  });
+
   const staffPreHandlers = [
     (request: Parameters<typeof fastify.requireTelegramAuth>[0], reply: Parameters<typeof fastify.requireTelegramAuth>[1]) =>
       fastify.requireTelegramAuth(request, reply),
@@ -73,7 +107,7 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
       orderBy: [{ slot: { startTime: "asc" } }, { createdAt: "asc" }],
     });
 
-    return { bookings: bookings.map(toRestaurantBookingDto) };
+    return { bookings: bookings.map(toDto) };
   });
 
   fastify.post("/restaurant/bookings/check-in", { preHandler: staffPreHandlers }, async (request, reply) => {
@@ -86,6 +120,7 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
 
     const booking = await prisma.booking.findFirst({
       where: { code: rawCode.trim().toUpperCase(), slot: { offer: { restaurantId } } },
+      include: { slot: true },
     });
 
     if (!booking) {
@@ -97,14 +132,17 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
     if (booking.status === "cancelled") {
       return reply.code(409).send({ error: "booking_cancelled" });
     }
+    if (!visitWindow(booking.slot, now(), timeZone).canMarkArrived) {
+      return reply.code(409).send({ error: "outside_visit_window", slotDate: toDateString(booking.slot.date), slotStartTime: booking.slot.startTime });
+    }
 
     const updated = await prisma.booking.update({
       where: { id: booking.id },
-      data: { status: "arrived" },
+      data: markData("arrived", "code"),
       include: bookingInclude,
     });
 
-    return toRestaurantBookingDto(updated);
+    return toDto(updated);
   });
 
   fastify.patch("/restaurant/bookings/:id", { preHandler: staffPreHandlers }, async (request, reply) => {
@@ -118,6 +156,7 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
 
     const booking = await prisma.booking.findFirst({
       where: { id, slot: { offer: { restaurantId } } },
+      include: { slot: true },
     });
 
     if (!booking) {
@@ -127,13 +166,18 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(409).send({ error: "booking_cancelled" });
     }
 
+    const window = visitWindow(booking.slot, now(), timeZone);
+    if (status === "arrived" ? !window.canMarkArrived : !window.canMarkNoShow) {
+      return reply.code(409).send({ error: "outside_visit_window" });
+    }
+
     const updated = await prisma.booking.update({
       where: { id },
-      data: { status: status as MarkableStatus },
+      data: markData(status as MarkableStatus, "manual"),
       include: bookingInclude,
     });
 
-    return toRestaurantBookingDto(updated);
+    return toDto(updated);
   });
 
   fastify.get("/restaurant/stats", { preHandler: staffPreHandlers }, async (request, reply) => {
@@ -153,14 +197,14 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
         date: true,
         seatsTotal: true,
         seatsBooked: true,
-        bookings: { select: { status: true } },
+        bookings: { select: { status: true, disputedAt: true } },
       },
     });
 
     const byDate = new Map<string, RestaurantDayStatsDto>();
     for (let i = 0; i < days; i++) {
       const date = toDateString(addDays(from, i));
-      byDate.set(date, { date, seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0 });
+      byDate.set(date, { date, seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0, disputed: 0 });
     }
 
     for (const slot of slots) {
@@ -169,8 +213,11 @@ const restaurantBookingsRoutes: FastifyPluginAsync = async (fastify) => {
       day.seatsTotal += slot.seatsTotal;
       day.seatsBooked += slot.seatsBooked;
       for (const booking of slot.bookings) {
-        if (booking.status === "arrived") day.arrived += 1;
-        if (booking.status === "no_show") day.noShow += 1;
+        if (booking.status !== "arrived" && booking.status !== "no_show") continue;
+        // A disputed mark is neither a trusted visit nor a trusted no-show.
+        if (booking.disputedAt) day.disputed += 1;
+        else if (booking.status === "arrived") day.arrived += 1;
+        else day.noShow += 1;
       }
     }
 

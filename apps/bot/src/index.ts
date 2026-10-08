@@ -5,6 +5,8 @@ import { markNoShows } from "./noShow/markNoShowsJob.js";
 import { runReminderTick } from "./reminders/reminderJob.js";
 import { startScheduler } from "./scheduler.js";
 import { runStaffNotificationTick } from "./staffNotifications/notifyStaffJob.js";
+import { disputeVisit } from "./visitNotifications/disputeVisit.js";
+import { runGuestVisitTick } from "./visitNotifications/notifyGuestVisitJob.js";
 
 const token = process.env.BOT_TOKEN;
 if (!token) {
@@ -96,6 +98,23 @@ bot.command("add_staff", async (ctx) => {
   );
 });
 
+const DISPUTE_PREFIX = "dispute:";
+
+// The guest disputes how their visit was marked (button under the visit message).
+bot.callbackQuery(new RegExp(`^${DISPUTE_PREFIX}`), async (ctx) => {
+  const bookingId = ctx.callbackQuery.data.slice(DISPUTE_PREFIX.length);
+  const result = await disputeVisit(bookingId, BigInt(ctx.from.id), new Date());
+
+  if (result === "not_found") {
+    await ctx.answerCallbackQuery({ text: "Эта бронь не найдена", show_alert: true });
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: "Спасибо! Ресторан увидит, что вы оспорили отметку." });
+  // Drop the button so it can't be pressed again; keep the message itself.
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  await ctx.reply("Отметка оспорена — ресторан это увидит. Спасибо, что сообщили.").catch(() => {});
+});
+
 /** The user blocked the bot or never opened it: retrying cannot succeed. */
 function isPermanentTelegramFailure(err: unknown): boolean {
   if (!(err instanceof GrammyError)) return false;
@@ -144,6 +163,23 @@ const stopJobs = startScheduler({
             send: sendWithAppButton("Мои брони"),
             isPermanentFailure: isPermanentTelegramFailure,
             onError: logJobError("reminder"),
+          }),
+        ),
+    },
+    {
+      name: "guest-visits",
+      run: async (now) =>
+        summarize(
+          await runGuestVisitTick({
+            now,
+            timeZone: appTimeZone,
+            send: async ({ chatId, text, bookingId, disputeLabel }) => {
+              await bot.api.sendMessage(Number(chatId), text, {
+                reply_markup: { inline_keyboard: [[{ text: disputeLabel, callback_data: `${DISPUTE_PREFIX}${bookingId}` }]] },
+              });
+            },
+            isPermanentFailure: isPermanentTelegramFailure,
+            onError: logJobError("guest visit message"),
           }),
         ),
     },

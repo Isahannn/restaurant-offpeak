@@ -10,6 +10,8 @@ const BOT_TOKEN = "123456:TEST-TOKEN-FOR-UNIT-TESTS";
 const STAFF_A = 7001;
 const STAFF_B = 7002;
 const DATE = "2030-03-04";
+// Slots below run 12:00–13:00 UTC on DATE; "now" is ten minutes in.
+const NOW = new Date("2030-03-04T12:10:00Z");
 
 function buildInitData(telegramUserId: number): string {
   const fields = {
@@ -25,11 +27,11 @@ function buildInitData(telegramUserId: number): string {
   return new URLSearchParams({ ...fields, hash }).toString();
 }
 
-function buildApp() {
+function buildApp(now: Date = NOW) {
   const app = Fastify();
   app.register(authPlugin, { botToken: BOT_TOKEN });
   app.register(staffPlugin);
-  app.register(restaurantBookingsRoutes);
+  app.register(restaurantBookingsRoutes, { now: () => now, timeZone: "UTC" });
   return app;
 }
 
@@ -122,9 +124,14 @@ describe("restaurant bookings routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const body = response.json() as { bookings: Array<{ id: string; code: string; slotStartTime: string }> };
-    expect(body.bookings.map((b) => b.code)).toEqual([bookingACode]);
+    const body = response.json() as {
+      bookings: Array<Record<string, unknown> & { codeHint: string; slotStartTime: string }>;
+    };
+    expect(body.bookings.map((b) => b.codeHint)).toEqual([`••••${bookingACode.slice(-2)}`]);
     expect(body.bookings[0].slotStartTime).toBe("12:00");
+    // The full code must never reach the staff list.
+    expect(JSON.stringify(body)).not.toContain(bookingACode);
+    expect(body.bookings[0]).toMatchObject({ canMarkArrived: true, canMarkNoShow: true, disputed: false });
   });
 
   it("rejects an invalid date", async () => {
@@ -150,6 +157,39 @@ describe("restaurant bookings routes", () => {
     expect(untouched?.status).toBe("pending");
   });
 
+  it("refuses visit marks outside the visit window, e.g. two days early", async () => {
+    const twoDaysEarly = buildApp(new Date("2030-03-02T12:10:00Z"));
+
+    const manual = await twoDaysEarly.inject({
+      method: "PATCH",
+      url: `/restaurant/bookings/${bookingAId}`,
+      headers: { "x-telegram-init-data": buildInitData(STAFF_A) },
+      payload: { status: "arrived" },
+    });
+    expect(manual.statusCode).toBe(409);
+    expect(manual.json().error).toBe("outside_visit_window");
+
+    const byCode = await twoDaysEarly.inject({
+      method: "POST",
+      url: "/restaurant/bookings/check-in",
+      headers: { "x-telegram-init-data": buildInitData(STAFF_A) },
+      payload: { code: bookingACode },
+    });
+    expect(byCode.statusCode).toBe(409);
+
+    // No-show only after the slot started: 11:59 is too early.
+    const noShowEarly = await buildApp(new Date("2030-03-04T11:59:00Z")).inject({
+      method: "PATCH",
+      url: `/restaurant/bookings/${bookingAId}`,
+      headers: { "x-telegram-init-data": buildInitData(STAFF_A) },
+      payload: { status: "no_show" },
+    });
+    expect(noShowEarly.statusCode).toBe(409);
+
+    const untouched = await prisma.booking.findUniqueOrThrow({ where: { id: bookingAId } });
+    expect(untouched.status).toBe("pending");
+  });
+
   it("checks in a booking by code, case-insensitively", async () => {
     const response = await buildApp().inject({
       method: "POST",
@@ -159,7 +199,7 @@ describe("restaurant bookings routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().status).toBe("arrived");
+    expect(response.json()).toMatchObject({ status: "arrived", checkInMethod: "code" });
   });
 
   it("refuses to check in the same booking twice", async () => {
@@ -198,7 +238,11 @@ describe("restaurant bookings routes", () => {
       payload: { status: "no_show" },
     });
     expect(own.statusCode).toBe(200);
-    expect(own.json().status).toBe("no_show");
+    expect(own.json()).toMatchObject({ status: "no_show", checkInMethod: null });
+
+    // Every new mark is queued for the guest notification again.
+    const stored = await prisma.booking.findUniqueOrThrow({ where: { id: bookingAId } });
+    expect(stored.guestNotifiedStatusAt).toBeNull();
   });
 
   it("returns per-day fill stats reflecting visit marks", async () => {
@@ -211,8 +255,8 @@ describe("restaurant bookings routes", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json() as { days: Array<Record<string, unknown>> };
     expect(body.days).toEqual([
-      { date: DATE, seatsTotal: 10, seatsBooked: 3, arrived: 0, noShow: 1 },
-      { date: "2030-03-05", seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0 },
+      { date: DATE, seatsTotal: 10, seatsBooked: 3, arrived: 0, noShow: 1, disputed: 0 },
+      { date: "2030-03-05", seatsTotal: 0, seatsBooked: 0, arrived: 0, noShow: 0, disputed: 0 },
     ]);
   });
 });

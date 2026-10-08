@@ -13,6 +13,11 @@ enum StaffRole {
   staff
 }
 
+enum CheckInMethod {
+  code
+  manual
+}
+
 enum BookingStatus {
   pending
   confirmed
@@ -107,6 +112,12 @@ model Booking {
   reminderSentAt  DateTime?
   /// Set once restaurant staff have been told about this booking (bot outbox).
   staffNotifiedAt DateTime?
+  /// How "arrived" was recorded: the guest showed their code, or staff marked it by hand.
+  checkInMethod   CheckInMethod?
+  /// Set once the guest has been told how their visit was marked (bot outbox).
+  guestNotifiedStatusAt DateTime?
+  /// The guest says the arrived / no-show mark is wrong.
+  disputedAt      DateTime?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
