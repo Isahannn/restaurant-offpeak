@@ -1,3 +1,3 @@
 # apps/web
 
-Мини-приложение Telegram на React + Vite. Обзор проекта, запуск и переменные окружения — в [корневом README](../../README.md).
+The Telegram Mini App, built with React and Vite. See the [root README](../../README.md) for the project overview, setup and environment variables.

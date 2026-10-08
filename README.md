@@ -2,10 +2,10 @@
 
 # TheFood
 
-**Скидки на тихие часы ресторанов — прямо в Telegram**
+**Off-peak restaurant discounts, right inside Telegram**
 
-Рестораны заполняют пустые столики скидками в непопулярное время,<br>
-гости бронируют выгодный слот в мини-приложении за пару касаний.
+Restaurants fill empty tables with discounts during their quiet hours.<br>
+Guests grab a discounted slot in a Telegram Mini App in a couple of taps.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -19,45 +19,47 @@
 
 ---
 
-## Содержание
+## Contents
 
-- [Возможности](#возможности)
-- [Как это работает](#как-это-работает)
-- [Быстрый старт](#быстрый-старт)
-- [Переменные окружения](#переменные-окружения)
-- [Команды](#команды)
-- [Структура проекта](#структура-проекта)
-- [Надёжность](#надёжность)
-- [Тесты](#тесты)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Quick start](#quick-start)
+- [Environment variables](#environment-variables)
+- [Reference](#reference)
+- [Project structure](#project-structure)
+- [Reliability](#reliability)
+- [Tests](#tests)
 
 ---
 
-## Возможности
+## Features
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-### Для гостя
+### For guests
 
-- Лента предложений со скидками и карусель лучших
-- Страница ресторана: фото, описание, все слоты
-- Выбор даты, времени и количества гостей
-- Код брони, который показывается в ресторане
-- «Мои брони»: предстоящие и прошедшие, отмена до начала слота
-- Напоминание в Telegram за 2 часа до визита
+- Feed with **Now / Today / Tomorrow / All** filters and a best-deals carousel
+- Large photo cards with quick time chips — tap a time to book
+- Booking in a bottom sheet: day, time, party size, then a code and QR
+- Restaurant pages with a full-bleed hero and all offers
+- **My bookings**: upcoming and past, cancel until the slot starts
+- Telegram reminder before the visit
+- A message after each visit mark, with a button to **dispute** it
 
 </td>
 <td width="50%" valign="top">
 
-### Для ресторана
+### For restaurants
 
-- Панель персонала прямо в мини-приложении
-- **Сегодня** — отметка визита по коду, «пришёл / не пришёл»
-- **Предложения** — создание, расписание, часы скидки, вкл/выкл
-- **Статистика** — заполненность слотов, визиты и неявки по дням
-- Уведомление в Telegram о каждой новой брони
-- Неотмеченные брони сами становятся «не пришёл»
+- Staff panel inside the same Mini App, chosen by role
+- **Today** — check guests in by code, live list without reloads
+- **Seats** — change capacity per slot or close whole hours for a banquet
+- **Offers** — create and **edit** offers, days, hours, several discount windows
+- **Stats** — fill rate, visits, no-shows and disputed marks per day
+- Telegram message for every new booking
+- Unmarked bookings become no-shows automatically
 
 </td>
 </tr>
@@ -65,186 +67,196 @@
 
 ---
 
-## Как это работает
+## How it works
 
 ```mermaid
 flowchart LR
-    Guest(["Гость"]) -->|Telegram| Bot
-    Staff(["Персонал"]) -->|Telegram| Bot
-    Bot["Бот · grammY"] -->|кнопка WebApp| Web["Мини-апп · React + Vite"]
+    Guest(["Guest"]) -->|Telegram| Bot
+    Staff(["Staff"]) -->|Telegram| Bot
+    Bot["Bot · grammY"] -->|WebApp button| Web["Mini App · React + Vite"]
     Web -->|"/api · initData"| API["API · Fastify"]
+    API -->|"SSE · live updates"| Web
     API --> DB[("PostgreSQL")]
-    Bot -->|"фоновые задачи"| DB
+    DB -->|"NOTIFY booking_events"| API
+    Bot -->|"background jobs"| DB
 ```
 
-| Сервис | Что делает |
+| Service | What it does |
 |---|---|
-| **`apps/web`** | Мини-приложение. Гость видит ленту и брони, персонал — панель ресторана. Роль определяется автоматически. |
-| **`apps/api`** | REST API. Каждый запрос подписан Telegram `initData` (HMAC-SHA256), персонал видит только свой ресторан. Раз в час продлевает слоты на 14 дней вперёд. |
-| **`apps/bot`** | Кнопка входа в мини-апп, админ-команды и три фоновые задачи раз в минуту: уведомления персоналу, напоминания гостям, автоотметка неявок. |
-| **`packages/db`** | Prisma-схема, миграции и клиент. |
-| **`packages/shared`** | Общие типы DTO и работа со временем слотов в таймзоне ресторана. |
+| **`apps/web`** | The Mini App. Guests get the feed and their bookings; staff get the restaurant panel. Screens are lazy-loaded, so guests never download staff code. |
+| **`apps/api`** | REST API. Every request is signed with Telegram `initData` (HMAC-SHA256), and staff only ever see their own restaurant. Streams live booking events to the panel over Server-Sent Events and tops up slots 14 days ahead every hour. |
+| **`apps/bot`** | Mini App button, admin commands and four background jobs that run every minute: staff notifications, guest reminders, visit messages and automatic no-shows. |
+| **`packages/db`** | Prisma schema, migrations and client. |
+| **`packages/shared`** | Shared DTO types and time-zone-aware slot time helpers. |
 
-**Модель данных:** `Restaurant` → `Offer` (дни недели, часы, скидка, исключения) → `Slot` (конкретная дата и час с лимитом мест) → `Booking` (гость, код, статус).
+**Data model:** `Restaurant` → `Offer` (days, hours, discount windows, exceptions) → `Slot` (a concrete date and hour with a seat limit) → `Booking` (guest, code, status).
 
 ---
 
-## Быстрый старт
+## Quick start
 
-> Понадобятся **Docker**, **Node.js 20+** и токен бота от [@BotFather](https://t.me/BotFather).
+> You need **Docker**, **Node.js 20+** and a bot token from [@BotFather](https://t.me/BotFather).
 
-**1. Настройте окружение**
+**1. Configure the environment**
 
 ```bash
 cp .env.example .env
 ```
 
-Заполните в `.env` как минимум `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS` (свой id можно узнать у [@userinfobot](https://t.me/userinfobot)) и `WEBAPP_URL`.
+Fill in at least `BOT_TOKEN`, `ADMIN_TELEGRAM_IDS` (get your id from [@userinfobot](https://t.me/userinfobot)) and `WEBAPP_URL`.
 
-**2. Поднимите сервисы**
+**2. Start the services**
 
 ```bash
 npm install
 docker compose up -d --build
 ```
 
-**3. Примените миграции и заполните демо-данные**
+**3. Apply migrations and load demo data**
 
 ```bash
 docker compose exec api npx prisma migrate deploy --schema packages/db/prisma/schema.prisma
+docker compose restart api bot
 docker compose exec api npm run seed --workspace apps/api
 ```
 
-Сид создаёт 5 ресторанов с предложениями и слотами на две недели вперёд.
+The seed creates 5 restaurants with offers and slots for the next two weeks.
 
 > [!NOTE]
-> Контейнеры генерируют клиент Prisma при старте. После каждой новой миграции перезапустите их: `docker compose restart api bot` — иначе код увидит новые поля, а клиент базы нет.
+> The containers generate the Prisma client when they start. Restart them (`docker compose restart api bot`) after every new migration, otherwise the code sees new columns that the database client doesn't know about.
 
-**4. Откройте мини-апп в Telegram**
+**4. Open the Mini App in Telegram**
 
-Telegram открывает мини-приложения только по HTTPS, поэтому в разработке нужен туннель:
+Telegram only opens Mini Apps over HTTPS, so development needs a tunnel:
 
 ```bash
 ngrok http 127.0.0.1:5173
 ```
 
-Укажите выданный адрес в `WEBAPP_URL` и пересоздайте бота: `docker compose up -d bot`. Затем напишите боту `/start`.
+Put the issued URL into `WEBAPP_URL`, recreate the bot with `docker compose up -d bot`, and send `/start` to your bot.
 
 > [!IMPORTANT]
-> Направляйте туннель на `127.0.0.1`, а не на `localhost`. На macOS `localhost` сначала резолвится в IPv6 `::1`, и если на порту 5173 запущен другой Vite-сервер, Telegram откроет его.
+> Point the tunnel at `127.0.0.1`, not `localhost`. On macOS `localhost` resolves to IPv6 `::1` first, and if another Vite dev server listens on port 5173 there, Telegram will open that one instead.
 
-**5. Станьте персоналом ресторана**
+**5. Become restaurant staff**
 
-От имени администратора отправьте боту:
+As an admin, send the bot:
 
 ```text
-/register_restaurant Моё кафе
+/register_restaurant My Cafe
 /add_staff <restaurantId> <telegramUserId> owner
 ```
 
-После этого мини-апп откроет вам панель ресторана вместо ленты.
+The Mini App will then open the restaurant panel instead of the guest feed.
 
 ---
 
-## Переменные окружения
+## Environment variables
 
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |---|---|---|
-| `BOT_TOKEN` | — | Токен бота от @BotFather. **Обязательна.** |
-| `ADMIN_TELEGRAM_IDS` | — | Telegram id администраторов через запятую |
-| `WEBAPP_URL` | — | Публичный HTTPS-адрес мини-приложения |
-| `APP_TIMEZONE` | `Europe/Moscow` | Таймзона, в которой заданы часы слотов |
-| `REMINDER_LEAD_MINUTES` | `120` | За сколько минут до слота напоминать гостю |
-| `NO_SHOW_GRACE_MINUTES` | `30` | Через сколько минут после конца слота неотмеченная бронь становится «не пришёл» |
-| `SLOT_GENERATION_HORIZON_DAYS` | `14` | На сколько дней вперёд создаются слоты |
-| `DATABASE_URL` | см. `.env.example` | Подключение к Postgres внутри Docker-сети |
-| `DATABASE_URL_HOST` | см. `.env.example` | Подключение к Postgres с хоста (тесты, Prisma CLI) |
-| `POSTGRES_HOST_PORT` | `5433` | Порт Postgres на хосте |
-| `API_PORT` / `API_HOST` | `3000` / `0.0.0.0` | Адрес API |
+| `BOT_TOKEN` | — | Bot token from @BotFather. **Required.** |
+| `ADMIN_TELEGRAM_IDS` | — | Comma-separated Telegram ids allowed to run admin commands |
+| `WEBAPP_URL` | — | Public HTTPS URL of the Mini App |
+| `APP_TIMEZONE` | `Europe/Moscow` | Time zone the slot hours are expressed in |
+| `REMINDER_LEAD_MINUTES` | `120` | How long before a slot the guest is reminded |
+| `NO_SHOW_GRACE_MINUTES` | `30` | Minutes after a slot ends before an unmarked booking becomes a no-show |
+| `SLOT_GENERATION_HORIZON_DAYS` | `14` | How many days ahead slots are created |
+| `DATABASE_URL` | see `.env.example` | Postgres connection inside the Docker network |
+| `DATABASE_URL_HOST` | see `.env.example` | Postgres connection from the host (tests, Prisma CLI) |
+| `POSTGRES_HOST_PORT` | `5433` | Postgres port on the host |
+| `API_PORT` / `API_HOST` | `3000` / `0.0.0.0` | API address |
 
 ---
 
-## Команды
+## Reference
 
 <details open>
-<summary><b>Разработка</b></summary>
+<summary><b>Development commands</b></summary>
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `docker compose up -d` | Поднимает Postgres, API, бота и фронт с hot reload |
-| `docker compose logs -f bot` | Логи бота и фоновых задач |
-| `npm run prisma:migrate` | Создаёт и применяет миграцию (нужен `DATABASE_URL` хоста) |
-| `npm run build` | Собирает все пакеты |
+| `docker compose up -d` | Starts Postgres, API, bot and the web app with hot reload |
+| `docker compose logs -f bot` | Bot and background job logs |
+| `npm run prisma:migrate` | Creates and applies a migration (needs the host `DATABASE_URL`) |
+| `npm run build` | Builds every package |
 
 </details>
 
 <details>
-<summary><b>Команды бота</b></summary>
+<summary><b>Bot commands</b></summary>
 
-| Команда | Кто | Что делает |
+| Command | Who | What it does |
 |---|---|---|
-| `/start` | все | Кнопка открытия мини-приложения |
-| `/register_restaurant <название>` | админ | Создаёт ресторан и возвращает его id |
-| `/add_staff <restaurantId> <userId> [owner\|staff]` | админ | Добавляет сотрудника ресторана |
+| `/start` | everyone | Button that opens the Mini App |
+| `/register_restaurant <name>` | admin | Creates a restaurant and returns its id |
+| `/add_staff <restaurantId> <userId> [owner\|staff]` | admin | Adds a staff member to a restaurant |
 
 </details>
 
 <details>
-<summary><b>Основные эндпоинты API</b></summary>
+<summary><b>API endpoints</b></summary>
 
-| Метод | Путь | Кто |
+| Method | Path | Who |
 |---|---|---|
-| `GET` | `/offers` | гость |
-| `GET` | `/restaurants/:id` | гость |
-| `POST` | `/bookings` | гость |
-| `GET` | `/bookings/me` | гость |
-| `POST` | `/bookings/:id/cancel` | гость |
-| `GET` | `/me/role` | все |
-| `GET` `POST` | `/restaurant/offers` | персонал |
-| `PATCH` | `/restaurant/offers/:id` | персонал |
-| `GET` | `/restaurant/bookings?date=` | персонал |
-| `POST` | `/restaurant/bookings/check-in` | персонал |
-| `PATCH` | `/restaurant/bookings/:id` | персонал |
-| `GET` | `/restaurant/stats?from=&days=` | персонал |
+| `GET` | `/offers` | guest |
+| `GET` | `/restaurants/:id` | guest |
+| `POST` | `/bookings` | guest |
+| `GET` | `/bookings/me` | guest |
+| `POST` | `/bookings/:id/cancel` | guest |
+| `GET` | `/me/role` | everyone |
+| `GET` `POST` | `/restaurant/offers` | staff |
+| `PATCH` | `/restaurant/offers/:id` | staff — toggle or full edit |
+| `GET` | `/restaurant/bookings?date=` | staff |
+| `POST` | `/restaurant/bookings/check-in` | staff |
+| `PATCH` | `/restaurant/bookings/:id` | staff |
+| `GET` | `/restaurant/slots?date=` | staff |
+| `PATCH` | `/restaurant/slots/:id` | staff — one slot's seats |
+| `PATCH` | `/restaurant/slots` | staff — close or reopen an hour range |
+| `GET` | `/restaurant/stats?from=&days=` | staff |
+| `GET` | `/restaurant/events` | staff — live updates (SSE) |
 
-Все запросы требуют заголовок `x-telegram-init-data`.
+Every request needs the `x-telegram-init-data` header.
 
 </details>
 
 ---
 
-## Структура проекта
+## Project structure
 
 ```text
 .
 ├── apps
-│   ├── api            Fastify: маршруты, бронирование, генерация слотов
-│   ├── bot            grammY: команды, планировщик, уведомления, напоминания, неявки
-│   └── web            React + Vite: лента, страница ресторана, брони, панель персонала
+│   ├── api            Fastify: routes, booking, slot generation, live events
+│   ├── bot            grammY: commands, scheduler, notifications, reminders, no-shows
+│   └── web            React + Vite: feed, restaurant page, bookings, staff panel
 ├── packages
-│   ├── db             Prisma: схема, миграции, клиент
-│   └── shared         DTO и функции времени слотов
+│   ├── db             Prisma: schema, migrations, client
+│   └── shared         DTOs and slot time helpers
 ├── docker-compose.yml
 └── .env.example
 ```
 
 ---
 
-## Надёжность
+## Reliability
 
-Проект рассчитан на одновременные запросы и перезапуски:
+Built for concurrent requests, restarts and people who might bend the rules:
 
-- **Никакого овербукинга.** Места списываются одним атомарным `UPDATE … WHERE seatsBooked + n <= seatsTotal`. Конкурентные брони проверены тестом.
-- **Прошедшие слоты недоступны.** Сервер сравнивает время слота с текущим в таймзоне ресторана прямо в SQL, поэтому обойти проверку из клиента нельзя.
-- **Ровно одно уведомление.** Напоминания и сообщения персоналу сначала атомарно «забираются» в базе, потом отправляются. Дублей нет даже при нескольких экземплярах бота. При сбое сети сообщение уходит повторно, если пользователь заблокировал бота — нет.
-- **Отмена освобождает места один раз**, даже если гость нажал кнопку несколько раз подряд.
-- **Изоляция ресторанов.** `restaurantId` всегда берётся из записи сотрудника, а не из запроса.
+- **No overbooking.** Seats are taken with a single atomic `UPDATE … WHERE seatsBooked + n <= seatsTotal`; concurrent bookings are covered by a test.
+- **Started slots can't be booked.** The server compares the slot time with "now" in the restaurant's time zone inside SQL, so the client can't get around it.
+- **Honest visit marks.** "Arrived" can only be set from 30 minutes before the slot to the end of that day, and "no-show" only after the start. Staff see masked codes (`••••AB`), so check-in by code needs the guest. Every mark is sent to the guest, who can dispute it; disputed marks are counted separately.
+- **Capacity changes are race-free.** Seats can never drop below what is already booked — the check lives in the `UPDATE` itself.
+- **Editing an offer respects guests.** Booked slots keep the time and discount the guest agreed to; empty slots follow the new schedule; seats changed by hand (a closed banquet) are kept.
+- **Exactly one message.** Reminders, staff notifications and visit messages are claimed atomically before sending — no duplicates even with several bot instances. Network failures are retried; blocked chats are not.
+- **Live updates that recover.** The panel reconnects when the event stream goes silent (a proxy can keep a dead socket open) and resyncs anything it missed.
+- **Restaurant isolation.** `restaurantId` always comes from the staff record, never from the request.
 
 ---
 
-## Тесты
+## Tests
 
-Тесты интеграционные и работают с настоящим Postgres из `docker compose`:
+Integration tests run against the real Postgres from `docker compose`:
 
 ```bash
 export DATABASE_URL="postgresql://app:app@localhost:5433/restaurant_offpeak?schema=public"
@@ -253,10 +265,13 @@ npm test --workspace apps/api
 npm test --workspace apps/bot
 ```
 
-Покрыты проверка `initData`, генерация слотов, бронирование (включая гонки), отмена, панель персонала с изоляцией ресторанов, напоминания, уведомления персоналу и автоотметка неявок. Каждый тест создаёт собственные данные и удаляет их после прогона.
+They cover `initData` checks, slot generation and offer edits, booking (including races), cancellation, visit windows and check-in, slot capacity, restaurant isolation, live events, reminders, staff notifications, visit messages with disputes, and automatic no-shows.
+
+> [!WARNING]
+> The tests use the same database as the running app. Each test creates its own data far in the future and removes it afterwards, and any job that writes across the whole table is scoped to the test's own restaurant. Keep it that way when adding tests.
 
 ---
 
 <div align="center">
-<sub>Сделано с Telegram Mini Apps · TypeScript · любовью к пустым столикам в 15:00</sub>
+<sub>Built with Telegram Mini Apps · TypeScript · a soft spot for empty tables at 3 pm</sub>
 </div>
