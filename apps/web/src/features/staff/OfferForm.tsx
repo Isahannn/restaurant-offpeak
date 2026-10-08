@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { OfferAdminDto } from "@app/shared";
-import { apiPost } from "../../api/client";
+import { apiPatch, apiPost } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PartySizeStepper } from "../offers/PartySizeStepper";
@@ -20,22 +20,42 @@ const WEEK_DAYS = [
 
 const MAX_SEATS_PER_SLOT = 50;
 
-interface OfferFormProps {
-  onCancel: () => void;
-  onCreated: (offer: OfferAdminDto) => void;
+interface ScheduleChange {
+  created: number;
+  updated: number;
+  removed: number;
+  keptBooked: number;
 }
 
-export function OfferForm({ onCancel, onCreated }: OfferFormProps) {
-  const [title, setTitle] = useState("");
-  const [discountPercent, setDiscountPercent] = useState("20");
-  const [daysOfWeek, setDaysOfWeek] = useState<number[]>([1, 2, 3, 4]);
-  const [startTime, setStartTime] = useState("12:00");
-  const [endTime, setEndTime] = useState("22:00");
-  const [partialDiscount, setPartialDiscount] = useState(true);
-  const [discountStart, setDiscountStart] = useState("15:00");
-  const [discountEnd, setDiscountEnd] = useState("18:00");
-  const [seatsPerSlot, setSeatsPerSlot] = useState(4);
-  const [exceptions, setExceptions] = useState("");
+interface OfferFormProps {
+  /** Existing offer to edit; omit to create a new one. */
+  initial?: OfferAdminDto;
+  onCancel: () => void;
+  /** `note` summarises how an edit changed the offer's upcoming slots. */
+  onSaved: (offer: OfferAdminDto, note?: string) => void;
+}
+
+function describeScheduleChange({ created, removed, keptBooked }: ScheduleChange): string {
+  const parts = [];
+  if (created > 0) parts.push(`новых слотов: ${created}`);
+  if (removed > 0) parts.push(`убрано пустых: ${removed}`);
+  const changes = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+  const kept = keptBooked > 0 ? `. Слоты с бронями гостей (${keptBooked}) остались на прежних условиях` : "";
+  return `Сохранено${changes}${kept}`;
+}
+
+export function OfferForm({ initial, onCancel, onSaved }: OfferFormProps) {
+  const firstWindow = initial?.discountWindows[0];
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [discountPercent, setDiscountPercent] = useState(String(initial?.discountPercent ?? 20));
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(initial?.daysOfWeek ?? [1, 2, 3, 4]);
+  const [startTime, setStartTime] = useState(initial?.startTime ?? "12:00");
+  const [endTime, setEndTime] = useState(initial?.endTime ?? "22:00");
+  const [partialDiscount, setPartialDiscount] = useState(initial ? Boolean(firstWindow) : true);
+  const [discountStart, setDiscountStart] = useState(firstWindow?.startTime ?? "15:00");
+  const [discountEnd, setDiscountEnd] = useState(firstWindow?.endTime ?? "18:00");
+  const [seatsPerSlot, setSeatsPerSlot] = useState(initial?.seatsPerSlot ?? 4);
+  const [exceptions, setExceptions] = useState(initial?.exceptions.join(", ") ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempted, setAttempted] = useState(false);
@@ -66,7 +86,7 @@ export function OfferForm({ onCancel, onCreated }: OfferFormProps) {
     setSubmitting(true);
     setError(null);
     try {
-      const offer = await apiPost<OfferAdminDto>("/restaurant/offers", {
+      const payload = {
         title: title.trim(),
         discountPercent: discount,
         daysOfWeek,
@@ -75,8 +95,16 @@ export function OfferForm({ onCancel, onCreated }: OfferFormProps) {
         seatsPerSlot,
         exceptions: exceptions.split(",").map((e) => e.trim()).filter(Boolean),
         discountWindows: partialDiscount ? [{ startTime: discountStart, endTime: discountEnd }] : [],
-      });
-      onCreated(offer);
+      };
+      if (initial) {
+        const { schedule, ...offer } = await apiPatch<OfferAdminDto & { schedule: ScheduleChange }>(
+          `/restaurant/offers/${initial.id}`,
+          payload,
+        );
+        onSaved(offer, describeScheduleChange(schedule));
+      } else {
+        onSaved(await apiPost<OfferAdminDto>("/restaurant/offers", payload));
+      }
     } catch {
       setError("Не удалось сохранить предложение");
       setSubmitting(false);
@@ -85,7 +113,14 @@ export function OfferForm({ onCancel, onCreated }: OfferFormProps) {
 
   return (
     <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
-      <SectionHeader title="Новое предложение" subtitle="Слоты на 2 недели появятся сразу после сохранения" />
+      <SectionHeader
+        title={initial ? "Редактировать предложение" : "Новое предложение"}
+        subtitle={
+          initial
+            ? "Свободные слоты перестроятся под новое расписание. Брони гостей сохранятся на прежних условиях"
+            : "Слоты на 2 недели появятся сразу после сохранения"
+        }
+      />
 
       <Card style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
         <Field label="Название">

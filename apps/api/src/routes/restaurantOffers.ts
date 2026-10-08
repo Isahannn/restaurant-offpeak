@@ -3,6 +3,7 @@ import type { OfferAdminDto } from "@app/shared";
 import { prisma } from "@app/db";
 import { localDateString } from "@app/shared";
 import { appTimeZone, slotHorizonDays } from "../config.js";
+import { applyOfferSchedule } from "../offers/applyOfferSchedule.js";
 import { generateSlotsJob } from "../offers/generateSlotsJob.js";
 
 
@@ -164,24 +165,51 @@ const restaurantOffersRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.patch("/restaurant/offers/:id", { preHandler: staffPreHandlers }, async (request, reply) => {
     const restaurantId = request.restaurantStaff!.restaurantId;
     const { id } = request.params as { id: string };
-    const body = request.body as { active?: unknown };
-
-    if (typeof body.active !== "boolean") {
-      return reply.code(400).send({ error: "invalid_request" });
-    }
+    const body = (request.body ?? {}) as CreateOfferBody & { active?: unknown };
 
     const offer = await prisma.offer.findFirst({ where: { id, restaurantId } });
     if (!offer) {
       return reply.code(404).send({ error: "offer_not_found" });
     }
 
-    const updated = await prisma.offer.update({
-      where: { id },
-      data: { active: body.active },
-      include: { discountWindows: true },
+    // Toggle only: { active }.
+    if (body.title === undefined) {
+      if (typeof body.active !== "boolean") {
+        return reply.code(400).send({ error: "invalid_request" });
+      }
+      const updated = await prisma.offer.update({
+        where: { id },
+        data: { active: body.active },
+        include: { discountWindows: true },
+      });
+      return toOfferAdminDto(updated);
+    }
+
+    // Full edit: same rules as creating an offer.
+    const parsed = validateCreateOfferBody(body);
+    if (!parsed.ok) {
+      return reply.code(400).send({ error: "invalid_request" });
+    }
+    const { discountWindows, ...offerFields } = parsed.value;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.discountWindow.deleteMany({ where: { offerId: id } });
+      return tx.offer.update({
+        where: { id },
+        data: { ...offerFields, discountWindows: { create: discountWindows } },
+        include: { discountWindows: true },
+      });
     });
 
-    return toOfferAdminDto(updated);
+    const schedule = await applyOfferSchedule({
+      offerId: id,
+      previousSeatsPerSlot: offer.seatsPerSlot,
+      now: new Date(),
+      timeZone: appTimeZone,
+      horizonDays: slotHorizonDays,
+    });
+
+    return { ...toOfferAdminDto(updated), schedule };
   });
 };
 

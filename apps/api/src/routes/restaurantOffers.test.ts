@@ -167,4 +167,54 @@ describe("restaurant offers admin routes", () => {
     const updated = await prisma.offer.findUnique({ where: { id: offerBId } });
     expect(updated?.active).toBe(false);
   });
+
+  it("edits an offer and reports how its slots changed", async () => {
+    const app = buildApp();
+    const payload = {
+      title: "B's offer, edited",
+      discountPercent: 25,
+      exceptions: ["вино"],
+      daysOfWeek: [1, 3],
+      startTime: "10:00",
+      endTime: "13:00",
+      seatsPerSlot: 5,
+      discountWindows: [{ startTime: "10:00", endTime: "11:00" }],
+    };
+
+    const foreign = await app.inject({
+      method: "PATCH",
+      url: `/restaurant/offers/${offerBId}`,
+      headers: { "x-telegram-init-data": buildInitData(6001) },
+      payload,
+    });
+    expect(foreign.statusCode).toBe(404);
+
+    const invalid = await app.inject({
+      method: "PATCH",
+      url: `/restaurant/offers/${offerBId}`,
+      headers: { "x-telegram-init-data": buildInitData(6002) },
+      payload: { ...payload, endTime: "09:00" },
+    });
+    expect(invalid.statusCode).toBe(400);
+
+    const ok = await app.inject({
+      method: "PATCH",
+      url: `/restaurant/offers/${offerBId}`,
+      headers: { "x-telegram-init-data": buildInitData(6002) },
+      payload,
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toMatchObject({
+      title: "B's offer, edited",
+      discountPercent: 25,
+      exceptions: ["вино"],
+      daysOfWeek: [1, 3],
+      seatsPerSlot: 5,
+      discountWindows: [{ startTime: "10:00", endTime: "11:00" }],
+      schedule: expect.objectContaining({ removed: expect.any(Number), created: expect.any(Number) }),
+    });
+
+    const windows = await prisma.discountWindow.findMany({ where: { offerId: offerBId } });
+    expect(windows).toHaveLength(1);
+  });
 });
