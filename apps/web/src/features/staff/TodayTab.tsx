@@ -229,10 +229,11 @@ function BookingRow({
         flexDirection: "column",
         gap: "var(--space-3)",
         opacity: booking.status === "cancelled" ? 0.6 : 1,
-        // Same border width in both states so a highlight never shifts the layout.
-        borderColor: fresh ? "var(--color-accent)" : undefined,
-        boxShadow: fresh ? "0 0 0 3px var(--color-accent-soft)" : undefined,
         transition: "border-color var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out)",
+        // Only override when highlighted: an explicit `borderColor: undefined`
+        // would reset Card's border shorthand to currentColor. Same border width
+        // in both states, so the highlight never shifts the layout.
+        ...(fresh ? { borderColor: "var(--color-accent)", boxShadow: "0 0 0 3px var(--color-accent-soft)" } : {}),
       }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "var(--space-2)" }}>

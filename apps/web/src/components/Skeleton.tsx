@@ -14,7 +14,8 @@ export function Skeleton({ width = "100%", height, radius = "var(--radius-sm)", 
         width,
         height,
         borderRadius: radius,
-        background: "var(--color-surface-muted)",
+        // Translucent text colour reads on any background: page, card or sheet.
+        background: "color-mix(in srgb, var(--color-text) 9%, transparent)",
         animation: "skeleton-pulse 1.4s ease-in-out infinite",
         ...style,
       }}

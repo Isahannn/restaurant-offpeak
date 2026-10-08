@@ -83,7 +83,9 @@ body,
 }
 
 body {
-  background: var(--color-bg);
+  /* Telegram's own list screens: muted page, cards/bars in the section colour.
+     Keeps cards distinct in dark themes where bg and section colours match. */
+  background: var(--color-surface-muted);
   color: var(--color-text);
   font-family: var(--font-sans);
   font-size: var(--font-size-md);
@@ -109,6 +111,8 @@ button {
   /* Bleed to the screen edges so rows don't look clipped. */
   margin: 0 calc(var(--space-4) * -1);
   padding: 0 var(--space-4);
+  /* Without this, snapping aligns the first item to the edge and eats the padding. */
+  scroll-padding-inline: var(--space-4);
 }
 .scroll-row::-webkit-scrollbar {
   display: none;

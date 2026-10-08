@@ -76,7 +76,7 @@ export function Nav({ onLogoClick, onMyBookingsClick, restaurantName }: NavProps
           >
             {restaurantName}
           </span>
-        ) : (
+        ) : onMyBookingsClick ? (
           <button
             type="button"
             onClick={onMyBookingsClick}
@@ -96,7 +96,7 @@ export function Nav({ onLogoClick, onMyBookingsClick, restaurantName }: NavProps
           >
             <TicketIcon style={{ width: 16, height: 16 }} />
           </button>
-        )}
+        ) : null}
       </div>
     </header>
   );

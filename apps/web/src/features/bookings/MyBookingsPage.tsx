@@ -1,136 +1,62 @@
-import { useEffect, useState } from "react";
-import {
-  hideBackButton,
-  mountBackButton,
-  offBackButtonClick,
-  onBackButtonClick,
-  showBackButton,
-} from "@telegram-apps/sdk-react";
 import type { BookingConfirmationDto } from "@app/shared";
-import { apiGet } from "../../api/client";
+import { invalidate, useApi } from "../../api/useApi";
+import { Button } from "../../components/Button";
+import { Skeleton } from "../../components/Skeleton";
+import { useNow } from "../../hooks/useNow";
 import { bookingPhase } from "./bookingPhase";
 import { MyBookingCard } from "./MyBookingCard";
 
-interface MyBookingsPageProps {
-  onBack: () => void;
-}
-
-type LoadState =
-  | { status: "loading" }
-  | { status: "error" }
-  | { status: "ready"; bookings: BookingConfirmationDto[] };
-
-export function MyBookingsPage({ onBack }: MyBookingsPageProps) {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [now, setNow] = useState(() => Date.now());
-
+export function MyBookingsPage() {
+  const state = useApi<{ bookings: BookingConfirmationDto[] }>("/bookings/me");
   // Re-evaluate every 30s so cancel links and statuses change while the page stays open.
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
+  const now = useNow(30_000);
 
-  useEffect(() => {
-    try {
-      mountBackButton();
-      showBackButton();
-      onBackButtonClick(onBack);
-    } catch {
-      // Not running inside Telegram — no native back button available.
-    }
-    return () => {
-      try {
-        offBackButtonClick(onBack);
-        hideBackButton();
-      } catch {
-        // noop
-      }
-    };
-  }, [onBack]);
-
-  const replaceBooking = (updated: BookingConfirmationDto) =>
-    setState((prev) =>
-      prev.status === "ready"
-        ? { status: "ready", bookings: prev.bookings.map((b) => (b.id === updated.id ? updated : b)) }
-        : prev,
-    );
-
-  useEffect(() => {
-    let cancelled = false;
-
-    apiGet<{ bookings: BookingConfirmationDto[] }>("/bookings/me")
-      .then((data) => {
-        if (!cancelled) setState({ status: "ready", bookings: data.bookings });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ status: "error" });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // A cancellation frees seats, so the feed and restaurant pages are stale too.
+  const onChange = () => invalidate("/bookings/me", "/offers", "/restaurants");
 
   return (
-    <div
-      style={{
-        maxWidth: 480,
-        margin: "0 auto",
-        padding: "var(--space-4)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--space-4)",
-      }}
-    >
-      <button
-        type="button"
-        onClick={onBack}
-        style={{
-          alignSelf: "flex-start",
-          background: "none",
-          border: "none",
-          color: "var(--color-text-muted)",
-          fontSize: "var(--font-size-sm)",
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        ← Назад
-      </button>
-
-      <h1 style={{ margin: 0, fontSize: "var(--font-size-lg)", fontWeight: 600 }}>Мои брони</h1>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+      <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, letterSpacing: "-0.01em" }}>Мои брони</h1>
 
       {state.status === "loading" && (
-        <p style={{ color: "var(--color-text-muted)" }}>Загружаем брони…</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+          <Skeleton height={140} radius="var(--radius-lg)" />
+          <Skeleton height={140} radius="var(--radius-lg)" />
+        </div>
       )}
 
       {state.status === "error" && (
-        <p style={{ color: "var(--color-danger)" }}>
-          Не удалось загрузить брони. Попробуйте позже.
+        <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "var(--space-3)", alignItems: "center" }}>
+          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>Не удалось загрузить брони</p>
+          <Button variant="secondary" onClick={state.reload}>
+            Повторить
+          </Button>
+        </div>
+      )}
+
+      {state.status === "ready" && state.data.bookings.length === 0 && (
+        <p style={{ margin: "var(--space-5) 0", textAlign: "center", color: "var(--color-text-muted)" }}>
+          Здесь появятся ваши брони — выберите столик в ленте
         </p>
       )}
 
-      {state.status === "ready" && state.bookings.length === 0 && (
-        <p style={{ color: "var(--color-text-muted)" }}>У вас пока нет броней.</p>
-      )}
-
-      {state.status === "ready" && state.bookings.length > 0 && (
+      {state.status === "ready" && state.data.bookings.length > 0 && (
         <>
           <BookingSection
             title="Предстоящие"
-            bookings={state.bookings
+            bookings={state.data.bookings
               .filter((b) => isUpcoming(b, now))
               .sort((a, b) => startKey(a).localeCompare(startKey(b)))}
             now={now}
-            onChange={replaceBooking}
+            onChange={onChange}
           />
           <BookingSection
             title="Прошедшие"
-            bookings={state.bookings
+            bookings={state.data.bookings
               .filter((b) => !isUpcoming(b, now))
               .sort((a, b) => startKey(b).localeCompare(startKey(a)))}
             now={now}
-            onChange={replaceBooking}
+            onChange={onChange}
           />
         </>
       )}
